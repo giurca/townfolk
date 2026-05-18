@@ -157,9 +157,67 @@ public final class TradeService {
                + " item=" + offer.requestItemId() + " count=" + offer.requestCount()
                + " pay=" + offer.paymentEmeralds(), "");
          changed = true;
+         // Fire off LLM flavor generation. Async; updates the offer
+         // in-place on the server thread when it lands. If LLM is
+         // disabled (no api key) or errors out, the offer keeps its
+         // empty blurb — the cell still renders fine without it.
+         requestFlavor(level, ts, offer);
       }
       LAST_GENERATED_DAY.put(data, currentDay);
       if (changed) ts.setChanged();
+   }
+
+   /** Ask the LLM for a one-line flavor blurb for this offer. Cheap
+    *  (~30 tokens out). Fire-and-forget: on result, drop the blurb
+    *  onto the offer record via replaceTradeOffer (server thread). */
+   private static void requestFlavor(ServerLevel level, TownSquareBlockEntity ts, TradeOffer offer) {
+      String model = com.yucareux.townfolk.config.TownfolkConfig.COMMON.dialogueModel.get();
+      String system = "You write very short flavor lines for fantasy trade offers. "
+                    + "Reply with EXACTLY ONE sentence, under 25 words, no quotes. "
+                    + "First-person from the visiting trader's POV, naming the item.";
+      String user = "Visitor archetype: " + offer.archetype().displayName() + ". "
+                  + "They want " + offer.requestCount() + "× "
+                  + shortName(offer.requestItemId()) + " "
+                  + "for " + offer.paymentEmeralds() + " emeralds. "
+                  + "Tier: " + offer.tier().name().toLowerCase(java.util.Locale.ROOT) + ". "
+                  + "Write a single line that reads like a notice they pinned to the town's "
+                  + "Trade Post.";
+      String townName = ts.getTown().townName();
+      String offerId = offer.id();
+      net.minecraft.server.MinecraftServer server = level.getServer();
+      com.yucareux.townfolk.llm.LlmClient.get()
+         .chat(model, system, user)
+         .whenComplete((result, err) -> {
+            if (err != null || result == null || !result.ok()) {
+               VerboseLog.write("TRADE_FLAVOR_FAIL",
+                  "town=" + townName + " offer=" + offerId
+                     + " err=" + (err == null ? (result == null ? "?" : result.error()) : err.getMessage()),
+                  "");
+               return;
+            }
+            String blurb = result.content();
+            if (blurb == null) return;
+            blurb = blurb.trim();
+            if (blurb.startsWith("\"") && blurb.endsWith("\"") && blurb.length() >= 2) {
+               blurb = blurb.substring(1, blurb.length() - 1).trim();
+            }
+            if (blurb.length() > 240) blurb = blurb.substring(0, 240);
+            final String fixedBlurb = blurb;
+            // Apply on the server thread so we never race with the
+            // TownData mutations in the daily tick.
+            if (server == null) return;
+            server.execute(() -> {
+               var maybe = ts.getTown().findTradeOffer(offerId);
+               if (maybe.isEmpty()) return;
+               // Only stamp the blurb if the offer's still active —
+               // don't ressurect a fulfilled/expired one.
+               if (!maybe.get().isActive()) return;
+               ts.getTown().replaceTradeOffer(maybe.get().withFlavor(fixedBlurb));
+               ts.setChanged();
+               VerboseLog.write("TRADE_FLAVOR_OK",
+                  "town=" + townName + " offer=" + offerId, fixedBlurb);
+            });
+         });
    }
 
    /** Roll a single new offer. Returns null only if NO archetype has
