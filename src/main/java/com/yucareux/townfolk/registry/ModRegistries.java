@@ -110,7 +110,12 @@ public final class ModRegistries {
          .mapColor(MapColor.WOOD)
          .strength(2.0F, 4.0F)
          .requiresCorrectToolForDrops()
-         .sound(SoundType.WOOD))
+         .sound(SoundType.WOOD)
+         // The model is a thin post + sign + base, not a full 1×1×1
+         // cube. Without noOcclusion the renderer treats this block as
+         // opaque and culls every neighbouring block's faces that touch
+         // it — leaves a black hole in the world around the post.
+         .noOcclusion())
    );
 
    public static final Supplier<Item> TRADE_POST_ITEM = ITEMS.register(

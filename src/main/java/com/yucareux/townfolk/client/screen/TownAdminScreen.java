@@ -107,6 +107,14 @@ public final class TownAdminScreen extends Screen {
    /** When set, the Resources tab renders a floating popup listing every
     *  barrel that holds this item. */
    private String selectedResourceItem;
+
+   /** Resource-grid cell wrapper. Combines a wire-format ItemCount with
+    *  a flag indicating whether the row is a town-treasury entry
+    *  (claimable payout) vs. a regular stockpile row. Lets the same
+    *  grid render both, with distinct styling per cell type and a
+    *  branched click handler (treasury → withdraw, stockpile →
+    *  production-cap popup). */
+   private record ResCell(TownStateUpdatePayload.ItemCount ic, boolean treasury) {}
    /** Search filter on the Resources grid — matches against item id /
     *  pretty name. */
    private EditBox resourceSearchBox;
@@ -374,14 +382,10 @@ public final class TownAdminScreen extends Screen {
    private static final int TRADE_CELL_W = 96;
    private static final int TRADE_CELL_H = 80;
    private static final int TRADE_CELL_GAP = 8;
-   /** Vertical band reserved for the header (y+10) and the treasury
-    *  row (y+22..y+44). Offer grid begins below. */
-   private static final int TRADE_GRID_TOP = 52;
-   /** Y offset where the treasury icon row sits. */
-   private static final int TRADE_TREASURY_Y = 22;
-   /** Side length of each treasury icon cell. */
-   private static final int TRADE_TREASURY_CELL = 22;
-   private static final int TRADE_TREASURY_GAP = 6;
+   /** Vertical band reserved for the header line. Offer grid begins
+    *  below. Treasury rendering moved out of the Trade tab — it lives
+    *  in the Resources grid now as a styled-distinct cell type. */
+   private static final int TRADE_GRID_TOP = 26;
 
    /** Row offset for grid scroll. Reset on tab switch. */
    private int tradeGridScrollRows = 0;
@@ -399,10 +403,6 @@ public final class TownAdminScreen extends Screen {
             + "  ·  Prestige: " + this.state.prestige() + " / "
             + com.yucareux.townfolk.town.TownData.MAX_PRESTIGE,
          innerR, top + 10);
-
-      // Treasury row — render before the offer grid so the player can
-      // see (and claim) their accumulated payouts at a glance.
-      renderTreasuryRow(graphics, innerL, innerR, top + TRADE_TREASURY_Y);
 
       var offers = this.state.tradeOffers();
       if (offers.isEmpty()) {
@@ -634,58 +634,6 @@ public final class TownAdminScreen extends Screen {
       return null;
    }
 
-   /** Render the treasury icon row at the top of the Trade tab. Each
-    *  withdrawable item gets a small clickable card; clicking it
-    *  withdraws (with shift = whole stack, see hitTestTreasuryCell). */
-   private void renderTreasuryRow(GuiGraphics g, int innerL, int innerR, int y) {
-      var treasury = this.state.treasury();
-      g.drawString(this.font, "Town treasury",
-         innerL, y + 4, FG_DIM, true);
-      if (treasury.isEmpty()) {
-         UiText.faint(g, this.font,
-            "(empty — fulfil offers below to collect payouts)",
-            innerL + 80, y + 4);
-         return;
-      }
-      int x = innerL + 80;
-      for (var ic : treasury) {
-         if (x + TRADE_TREASURY_CELL > innerR) break;     // run out of horizontal room
-         renderTreasuryCell(g, ic, x, y);
-         x += TRADE_TREASURY_CELL + TRADE_TREASURY_GAP;
-      }
-   }
-
-   private void renderTreasuryCell(GuiGraphics g,
-                                   TownStateUpdatePayload.ItemCount ic, int x, int y) {
-      g.fill(x, y, x + TRADE_TREASURY_CELL, y + TRADE_TREASURY_CELL, ROW_BG);
-      g.fill(x, y + TRADE_TREASURY_CELL,
-             x + TRADE_TREASURY_CELL, y + TRADE_TREASURY_CELL + 1, PANEL_BORDER);
-      var stack = stackForItemId(ic.itemId());
-      g.renderItem(stack, x + 3, y + 3);
-      // Count overlay, bottom-right, shadowed for legibility.
-      String n = String.valueOf(ic.count());
-      int nw = this.font.width(n);
-      g.drawString(this.font, n,
-         x + TRADE_TREASURY_CELL - nw - 1, y + TRADE_TREASURY_CELL - 8,
-         FG_ACCENT, true);
-   }
-
-   /** Hit-test for the treasury row. Returns the clicked item id or null. */
-   private String hitTestTreasuryCell(double mouseX, double mouseY,
-                                       int paneL, int paneR, int top) {
-      int innerL = paneL + UiTheme.PADDING;
-      int innerR = paneR - UiTheme.PADDING;
-      int y = top + TRADE_TREASURY_Y;
-      if (mouseY < y || mouseY >= y + TRADE_TREASURY_CELL) return null;
-      var treasury = this.state.treasury();
-      int x = innerL + 80;
-      for (var ic : treasury) {
-         if (x + TRADE_TREASURY_CELL > innerR) break;
-         if (mouseX >= x && mouseX < x + TRADE_TREASURY_CELL) return ic.itemId();
-         x += TRADE_TREASURY_CELL + TRADE_TREASURY_GAP;
-      }
-      return null;
-   }
 
    private void renderTasksTab(GuiGraphics graphics, int paneL, int paneR, int top, int bottom) {
       int innerL = paneL + PADDING;
@@ -1113,12 +1061,23 @@ public final class TownAdminScreen extends Screen {
                this.resourceSort = sortHit;
                return true;
             }
-            // Cell click → open popup (and rebuild widgets so the
-            // popup's EditBoxes / buttons appear).
-            String cellHit = hitTestResourceCell(mouseX, mouseY, paneL, paneR, contentTop, contentBottom);
+            // Cell click. Branch on whether this is a stockpile or
+            // treasury cell:
+            //  - Stockpile → open the production-cap popup (existing flow).
+            //  - Treasury  → withdraw immediately. Plain click takes
+            //    everything; shift-click takes 1.
+            ResCell cellHit = hitTestResourceCell(mouseX, mouseY, paneL, paneR, contentTop, contentBottom);
             if (cellHit != null) {
-               this.selectedResourceItem = cellHit;
-               rebuildAdminWidgets();
+               if (cellHit.treasury()) {
+                  boolean shift = net.minecraft.client.gui.screens.Screen.hasShiftDown();
+                  int requested = shift ? 1 : 0;
+                  PacketDistributor.sendToServer(
+                     new com.yucareux.townfolk.network.WithdrawTreasuryPayload(
+                        townPos(), cellHit.ic().itemId(), requested));
+               } else {
+                  this.selectedResourceItem = cellHit.ic().itemId();
+                  rebuildAdminWidgets();
+               }
                return true;
             }
          }
@@ -1160,18 +1119,6 @@ public final class TownAdminScreen extends Screen {
                }
                // Click outside popup also closes.
                this.selectedTradeOfferId = null;
-               return true;
-            }
-            // Treasury cell click → withdraw that item. Shift-click
-            // takes a single (max 1 stack); plain click takes all of
-            // the slot's count.
-            String treasuryHit = hitTestTreasuryCell(mouseX, mouseY, paneL, paneR, contentTop);
-            if (treasuryHit != null) {
-               boolean shift = net.minecraft.client.gui.screens.Screen.hasShiftDown();
-               int requested = shift ? 1 : 0;     // 0 = "take everything"
-               PacketDistributor.sendToServer(
-                  new com.yucareux.townfolk.network.WithdrawTreasuryPayload(
-                     townPos(), treasuryHit, requested));
                return true;
             }
             // Grid mode: click a cell → open popup.
@@ -1600,21 +1547,29 @@ public final class TownAdminScreen extends Screen {
       }
 
       // Apply search + sort to produce the rendered grid list.
+      // Treasury items (claimable payouts) are interleaved with normal
+      // stockpile items — same grid, styled differently per cell.
       String q = this.resourceSearchBox == null ? "" :
          this.resourceSearchBox.getValue().trim().toLowerCase(Locale.ROOT);
-      List<TownStateUpdatePayload.ItemCount> items = new java.util.ArrayList<>();
+      List<ResCell> items = new java.util.ArrayList<>();
       for (var ic : this.state.aggregateResources()) {
          if (q.isEmpty() || shortItemName(ic.itemId()).toLowerCase(Locale.ROOT).contains(q)
              || ic.itemId().contains(q)) {
-            items.add(ic);
+            items.add(new ResCell(ic, false));
+         }
+      }
+      for (var ic : this.state.treasury()) {
+         if (q.isEmpty() || shortItemName(ic.itemId()).toLowerCase(Locale.ROOT).contains(q)
+             || ic.itemId().contains(q)) {
+            items.add(new ResCell(ic, true));
          }
       }
       switch (this.resourceSort) {
-         case "name"   -> items.sort((a, b) -> shortItemName(a.itemId()).compareToIgnoreCase(shortItemName(b.itemId())));
+         case "name"   -> items.sort((a, b) -> shortItemName(a.ic().itemId()).compareToIgnoreCase(shortItemName(b.ic().itemId())));
          case "recent" -> items.sort((a, b) -> Long.compare(
-                                this.resourceRecentByItem.getOrDefault(b.itemId(), 0L),
-                                this.resourceRecentByItem.getOrDefault(a.itemId(), 0L)));
-         default        -> items.sort((a, b) -> Integer.compare(b.count(), a.count()));
+                                this.resourceRecentByItem.getOrDefault(b.ic().itemId(), 0L),
+                                this.resourceRecentByItem.getOrDefault(a.ic().itemId(), 0L)));
+         default        -> items.sort((a, b) -> Integer.compare(b.ic().count(), a.ic().count()));
       }
 
       // Render grid.
@@ -1646,14 +1601,14 @@ public final class TownAdminScreen extends Screen {
          // visually instead of disappearing.
          scaledScissor(graphics, innerL, gridTop, innerR, gridBot);
          int i = 0;
-         for (var ic : items) {
+         for (var cell : items) {
             int row = i / cols;
             int col = i % cols;
             int cx = gridX0 + col * (RES_CELL_W + RES_CELL_GAP);
             int cy = gridTop + row * (RES_CELL_H + RES_CELL_GAP) - scrollPx;
             if (cy > gridBot) break;
             if (cy + RES_CELL_H < gridTop) { i++; continue; } // scrolled off top
-            renderResourceCell(graphics, ic, cx, cy, mouseX, mouseY);
+            renderResourceCell(graphics, cell, cx, cy, mouseX, mouseY);
             i++;
          }
          graphics.disableScissor();
@@ -1666,39 +1621,72 @@ public final class TownAdminScreen extends Screen {
       }
    }
 
-   /** One cell of the resource grid.
+   /** Gold-ish hue for treasury cell backgrounds — distinguishes
+    *  claimable payouts from regular stockpile at a glance. */
+   private static final int TREASURY_CELL_BG     = 0x40FFC847;
+   private static final int TREASURY_CELL_BORDER = 0xFFFFC847;
+
+   /** One cell of the resource grid. Renders BOTH normal stockpile
+    *  entries and town-treasury entries (claimable payouts) — the
+    *  {@link ResCell#treasury} flag switches the styling and tag.
     *
-    *  Vertical layout (y offsets):
-    *    +2  badge strip  (status dot + "min/max" tag, only when a cap is set)
-    *    +12 item icon    (16×16, horizontally centred)
-    *    +30 count line   (e.g. "174", FG_ACCENT, centred)
-    *    +42 name line    (truncated, FG_DIM, centred)
-    *
-    *  All elements live in distinct vertical bands so the badge can
-    *  never overlap the icon or count — the original cramped layout
-    *  put the badge in the icon's row and it bled into the digits. */
-   private void renderResourceCell(GuiGraphics g, TownStateUpdatePayload.ItemCount ic,
+    *  <p>Vertical layout (y offsets):
+    *  <ul>
+    *    <li>+2  badge strip — "min/max" cap tag (stockpile) OR
+    *            "CLAIM" tag (treasury)
+    *    <li>+12 item icon (16×16, centred)
+    *    <li>+30 count line — ↑/↓ trend + count + "+N" in-flight (stockpile only)
+    *    <li>+42 name line (truncated, centred)
+    *  </ul> */
+   private void renderResourceCell(GuiGraphics g, ResCell cell,
                                    int x, int y, int mouseX, int mouseY) {
+      var ic = cell.ic();
+      boolean treasury = cell.treasury();
       boolean hovered = mouseX >= x && mouseX < x + RES_CELL_W
                      && mouseY >= y && mouseY < y + RES_CELL_H;
-      boolean selected = ic.itemId().equals(this.selectedResourceItem);
-      int bg = hovered || selected ? TAB_ACTIVE_BG : ROW_BG;
-      g.fill(x, y, x + RES_CELL_W, y + RES_CELL_H, bg);
-      g.fill(x, y + RES_CELL_H, x + RES_CELL_W, y + RES_CELL_H + 1,
-         selected ? FG_ACCENT : PANEL_BORDER);
+      // Treasury entries aren't selectable for the production-cap
+      // popup — they only respond to click-to-withdraw — so selection
+      // highlight is stockpile-only.
+      boolean selected = !treasury && ic.itemId().equals(this.selectedResourceItem);
 
-      // Badge strip (top) — only when a cap exists.
-      var target = findTargetFor(ic.itemId());
-      if (target != null) {
-         String tag = target.min() + "/" + target.max();
+      int bg = treasury ? TREASURY_CELL_BG
+            : (hovered || selected ? TAB_ACTIVE_BG : ROW_BG);
+      g.fill(x, y, x + RES_CELL_W, y + RES_CELL_H, bg);
+
+      if (treasury) {
+         // Full gold border on all four sides — strong visual cue that
+         // these are different from stockpile cells.
+         g.fill(x, y, x + RES_CELL_W, y + 1, TREASURY_CELL_BORDER);
+         g.fill(x, y + RES_CELL_H, x + RES_CELL_W, y + RES_CELL_H + 1, TREASURY_CELL_BORDER);
+         g.fill(x, y, x + 1, y + RES_CELL_H, TREASURY_CELL_BORDER);
+         g.fill(x + RES_CELL_W - 1, y, x + RES_CELL_W, y + RES_CELL_H, TREASURY_CELL_BORDER);
+      } else {
+         g.fill(x, y + RES_CELL_H, x + RES_CELL_W, y + RES_CELL_H + 1,
+            selected ? FG_ACCENT : PANEL_BORDER);
+      }
+
+      // Badge strip (top).
+      if (treasury) {
+         // "CLAIM" tag on the right; small gold pip on the left to
+         // mirror the production-cap status dot's location.
+         String tag = "CLAIM";
          int tagW = this.font.width(tag);
-         int tagX = x + RES_CELL_W - tagW - 4;
-         int tagY = y + 2;
-         g.drawString(this.font, tag, tagX, tagY,
-            target.active() ? FG_DIM : FG_ERROR, true);
-         // 3-pixel status dot on the LEFT of the strip.
-         int dotColor = target.active() ? UiTheme.OK : UiTheme.BAD;
-         g.fill(x + 3, y + 3, x + 6, y + 6, dotColor);
+         g.drawString(this.font, tag,
+            x + RES_CELL_W - tagW - 4, y + 2,
+            TREASURY_CELL_BORDER, true);
+         g.fill(x + 3, y + 3, x + 6, y + 6, TREASURY_CELL_BORDER);
+      } else {
+         var target = findTargetFor(ic.itemId());
+         if (target != null) {
+            String tag = target.min() + "/" + target.max();
+            int tagW = this.font.width(tag);
+            int tagX = x + RES_CELL_W - tagW - 4;
+            int tagY = y + 2;
+            g.drawString(this.font, tag, tagX, tagY,
+               target.active() ? FG_DIM : FG_ERROR, true);
+            int dotColor = target.active() ? UiTheme.OK : UiTheme.BAD;
+            g.fill(x + 3, y + 3, x + 6, y + 6, dotColor);
+         }
       }
 
       // Item icon — fixed band y+12 .. y+28.
@@ -1707,32 +1695,38 @@ public final class TownAdminScreen extends Screen {
       var stack = stackForItemId(ic.itemId());
       g.renderItem(stack, iconX, iconY);
 
-      // Count line — y+32. Composes:
-      //   ↑/↓ trend arrow (server-side day-over-day diff)
-      //   count
-      //   "+N" suffix when villagers are currently carrying any of
-      //   this item ("in flight"), so the player can tell at a glance
-      //   that the stockpile is about to grow.
-      int inFlight = inFlightFor(ic.itemId());
-      String arrow = ic.trend() > 0 ? "↑ " : ic.trend() < 0 ? "↓ " : "";
-      int arrowColor = ic.trend() > 0 ? UiTheme.OK
-                     : ic.trend() < 0 ? UiTheme.BAD
-                     : FG_FAINT;
-      String countText = String.valueOf(ic.count());
-      String suffix = inFlight > 0 ? "  +" + inFlight : "";
-      int arrowW = this.font.width(arrow);
-      int countW = this.font.width(countText);
-      int suffixW = this.font.width(suffix);
-      int totalW = arrowW + countW + suffixW;
-      int drawX = x + (RES_CELL_W - totalW) / 2;
-      if (!arrow.isEmpty()) {
-         g.drawString(this.font, arrow, drawX, y + 32, arrowColor, true);
-         drawX += arrowW;
-      }
-      g.drawString(this.font, countText, drawX, y + 32, FG_ACCENT, true);
-      drawX += countW;
-      if (!suffix.isEmpty()) {
-         g.drawString(this.font, suffix, drawX, y + 32, FG_FAINT, true);
+      // Count line — y+32.
+      // For STOCKPILE cells: ↑/↓ trend arrow + count + "+N" in-flight.
+      // For TREASURY cells: just the count, in the treasury gold tint
+      //   (no trend / in-flight — treasury is a one-way pool).
+      if (treasury) {
+         String countText = String.valueOf(ic.count());
+         int cw = this.font.width(countText);
+         g.drawString(this.font, countText,
+            x + (RES_CELL_W - cw) / 2, y + 32,
+            TREASURY_CELL_BORDER, true);
+      } else {
+         int inFlight = inFlightFor(ic.itemId());
+         String arrow = ic.trend() > 0 ? "↑ " : ic.trend() < 0 ? "↓ " : "";
+         int arrowColor = ic.trend() > 0 ? UiTheme.OK
+                        : ic.trend() < 0 ? UiTheme.BAD
+                        : FG_FAINT;
+         String countText = String.valueOf(ic.count());
+         String suffix = inFlight > 0 ? "  +" + inFlight : "";
+         int arrowW = this.font.width(arrow);
+         int countW = this.font.width(countText);
+         int suffixW = this.font.width(suffix);
+         int totalW = arrowW + countW + suffixW;
+         int drawX = x + (RES_CELL_W - totalW) / 2;
+         if (!arrow.isEmpty()) {
+            g.drawString(this.font, arrow, drawX, y + 32, arrowColor, true);
+            drawX += arrowW;
+         }
+         g.drawString(this.font, countText, drawX, y + 32, FG_ACCENT, true);
+         drawX += countW;
+         if (!suffix.isEmpty()) {
+            g.drawString(this.font, suffix, drawX, y + 32, FG_FAINT, true);
+         }
       }
 
       // Name line — y+44, truncated to cell width.
@@ -1742,7 +1736,8 @@ public final class TownAdminScreen extends Screen {
          shown = this.font.plainSubstrByWidth(shown, RES_CELL_W - 10) + "…";
       }
       int nw = this.font.width(shown);
-      g.drawString(this.font, shown, x + (RES_CELL_W - nw) / 2, y + 44, FG_DIM, true);
+      g.drawString(this.font, shown, x + (RES_CELL_W - nw) / 2, y + 44,
+         treasury ? TREASURY_CELL_BORDER : FG_DIM, true);
    }
 
    /** Sum the count of {@code itemId} across every villager's
@@ -1912,7 +1907,7 @@ public final class TownAdminScreen extends Screen {
    /** Hit-test for the resource grid. Returns the item id of the clicked
     *  cell, or {@code null} if the click was outside the grid. Uses the
     *  same geometry as {@link #renderResourcesTab}. */
-   private String hitTestResourceCell(double mouseX, double mouseY, int paneL, int paneR,
+   private ResCell hitTestResourceCell(double mouseX, double mouseY, int paneL, int paneR,
                                        int top, int bottom) {
       int innerL = paneL + UiTheme.PADDING;
       int innerR = paneR - UiTheme.PADDING;
@@ -1923,25 +1918,30 @@ public final class TownAdminScreen extends Screen {
       int gridUsed = cols * RES_CELL_W + (cols - 1) * RES_CELL_GAP;
       int gridX0   = innerL + (gridW - gridUsed) / 2;
 
-      // Need to apply the same search/sort as render — duplicate the
-      // logic (cheap, runs once per click).
+      // Mirror the search/sort + interleave logic from
+      // renderResourcesTab so click coordinates always match what the
+      // player sees.
       String q = this.resourceSearchBox == null ? "" :
          this.resourceSearchBox.getValue().trim().toLowerCase(Locale.ROOT);
-      List<TownStateUpdatePayload.ItemCount> items = new java.util.ArrayList<>();
+      List<ResCell> items = new java.util.ArrayList<>();
       for (var ic : this.state.aggregateResources()) {
          if (q.isEmpty() || shortItemName(ic.itemId()).toLowerCase(Locale.ROOT).contains(q)
-             || ic.itemId().contains(q)) items.add(ic);
+             || ic.itemId().contains(q)) items.add(new ResCell(ic, false));
+      }
+      for (var ic : this.state.treasury()) {
+         if (q.isEmpty() || shortItemName(ic.itemId()).toLowerCase(Locale.ROOT).contains(q)
+             || ic.itemId().contains(q)) items.add(new ResCell(ic, true));
       }
       switch (this.resourceSort) {
-         case "name"   -> items.sort((a, b) -> shortItemName(a.itemId()).compareToIgnoreCase(shortItemName(b.itemId())));
+         case "name"   -> items.sort((a, b) -> shortItemName(a.ic().itemId()).compareToIgnoreCase(shortItemName(b.ic().itemId())));
          case "recent" -> items.sort((a, b) -> Long.compare(
-                                this.resourceRecentByItem.getOrDefault(b.itemId(), 0L),
-                                this.resourceRecentByItem.getOrDefault(a.itemId(), 0L)));
-         default        -> items.sort((a, b) -> Integer.compare(b.count(), a.count()));
+                                this.resourceRecentByItem.getOrDefault(b.ic().itemId(), 0L),
+                                this.resourceRecentByItem.getOrDefault(a.ic().itemId(), 0L)));
+         default        -> items.sort((a, b) -> Integer.compare(b.ic().count(), a.ic().count()));
       }
       int scrollPx = this.resourcesGridScrollRows * (RES_CELL_H + RES_CELL_GAP);
       int i = 0;
-      for (var ic : items) {
+      for (var cell : items) {
          int row = i / cols;
          int col = i % cols;
          int cx = gridX0 + col * (RES_CELL_W + RES_CELL_GAP);
@@ -1953,7 +1953,7 @@ public final class TownAdminScreen extends Screen {
          if (mouseX >= cx && mouseX < cx + RES_CELL_W
              && mouseY >= cy && mouseY < Math.min(cy + RES_CELL_H, gridBot)
              && mouseY >= Math.max(cy, gridTop)) {
-            return ic.itemId();
+            return cell;
          }
          i++;
       }
