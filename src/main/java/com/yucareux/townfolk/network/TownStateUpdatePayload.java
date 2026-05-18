@@ -53,6 +53,7 @@ public record TownStateUpdatePayload(
    List<ResourceLoc> resourceLocations,
    List<ProductionTarget> productionTargets,
    List<ParcelSummary> parcels,
+   List<TradeOfferView> tradeOffers,
    int populationAlive,
    int populationTotal,
    /** Number of registered TRADE_POST auxiliary blocks. Gates the Trade tab. */
@@ -88,6 +89,22 @@ public record TownStateUpdatePayload(
     *  are currently producing, false when the cap is reached and
     *  they're waiting to drop below {@link #min}. */
    public record ProductionTarget(String itemId, int min, int max, boolean active) {}
+
+   /** Client-side view of one active trade offer. The full
+    *  {@link com.yucareux.townfolk.trade.TradeOffer} lives on the
+    *  server; here we ship only what the UI needs to render and let
+    *  the client fulfil. {@code daysRemaining} is precomputed by the
+    *  server so the client doesn't need its own day clock. */
+   public record TradeOfferView(
+      String id,
+      String archetypeName,         // e.g. "Wandering Wizard"
+      String tierName,              // "COMMON" / "NOTABLE" / "PREMIUM"
+      String requestItemId,
+      int requestCount,
+      int paymentEmeralds,
+      int daysRemaining,
+      String flavorBlurb
+   ) {}
 
    /** Per-parcel snapshot. {@link #ownerUuid} ties back to the
     *  {@link VillagerSummary#uuid()} list — UI joins them when rendering
@@ -193,6 +210,23 @@ public record TownStateUpdatePayload(
             buf.writeBoolean(t.active());
          },
          buf -> new ProductionTarget(buf.readUtf(), buf.readVarInt(), buf.readVarInt(), buf.readBoolean())
+      );
+
+   private static final StreamCodec<RegistryFriendlyByteBuf, TradeOfferView> TRADE_OFFER_CODEC =
+      StreamCodec.of(
+         (buf, o) -> {
+            buf.writeUtf(o.id());
+            buf.writeUtf(o.archetypeName());
+            buf.writeUtf(o.tierName());
+            buf.writeUtf(o.requestItemId());
+            buf.writeVarInt(o.requestCount());
+            buf.writeVarInt(o.paymentEmeralds());
+            buf.writeVarInt(o.daysRemaining());
+            buf.writeUtf(o.flavorBlurb() == null ? "" : o.flavorBlurb(), 256);
+         },
+         buf -> new TradeOfferView(
+            buf.readUtf(), buf.readUtf(), buf.readUtf(), buf.readUtf(),
+            buf.readVarInt(), buf.readVarInt(), buf.readVarInt(), buf.readUtf(256))
       );
 
    private static final StreamCodec<RegistryFriendlyByteBuf, ParcelSummary> PARCEL_CODEC =
@@ -335,6 +369,8 @@ public record TownStateUpdatePayload(
             for (ProductionTarget pt : p.productionTargets) TARGET_CODEC.encode(buf, pt);
             buf.writeVarInt(p.parcels.size());
             for (ParcelSummary ps : p.parcels) PARCEL_CODEC.encode(buf, ps);
+            buf.writeVarInt(p.tradeOffers.size());
+            for (TradeOfferView tov : p.tradeOffers) TRADE_OFFER_CODEC.encode(buf, tov);
             buf.writeVarInt(p.populationAlive);
             buf.writeVarInt(p.populationTotal);
             buf.writeVarInt(p.tradePostCount);
@@ -376,6 +412,9 @@ public record TownStateUpdatePayload(
             int pn = buf.readVarInt();
             java.util.ArrayList<ParcelSummary> parcels = new java.util.ArrayList<>(pn);
             for (int i = 0; i < pn; i++) parcels.add(PARCEL_CODEC.decode(buf));
+            int ton = buf.readVarInt();
+            java.util.ArrayList<TradeOfferView> tradeOffers = new java.util.ArrayList<>(ton);
+            for (int i = 0; i < ton; i++) tradeOffers.add(TRADE_OFFER_CODEC.decode(buf));
             int popA = buf.readVarInt();
             int popT = buf.readVarInt();
             int tradePosts = buf.readVarInt();
@@ -387,7 +426,7 @@ public record TownStateUpdatePayload(
             int dToday = buf.readVarInt();
             return new TownStateUpdatePayload(pos, name, orStatus, orUsage, orLimit, total,
                villagers, townFacts, log, storage,
-               agg, resLocs, targets, parcels,
+               agg, resLocs, targets, parcels, tradeOffers,
                popA, popT, tradePosts, prestige,
                idle, work, slp, bToday, dToday);
          }

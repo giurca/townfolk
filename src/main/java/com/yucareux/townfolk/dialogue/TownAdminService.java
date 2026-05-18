@@ -606,6 +606,26 @@ public final class TownAdminService {
          if (aux.type() == com.yucareux.townfolk.town.TownAuxiliaryType.TRADE_POST) tradePostCount++;
       }
 
+      // Build client-facing views for ACTIVE trade offers. Resolved
+      // offers stay in TownData (for end-of-day compaction) but never
+      // ship — the UI shouldn't show fulfilled / expired anyway.
+      long todayForTrades = level.getDayTime() / 24000L;
+      java.util.ArrayList<TownStateUpdatePayload.TradeOfferView> tradeOffersOut = new java.util.ArrayList<>();
+      for (var o : data.tradeOffers()) {
+         if (!o.isActive()) continue;
+         int daysRemaining = (int) Math.max(0, o.expireDay() - todayForTrades);
+         tradeOffersOut.add(new TownStateUpdatePayload.TradeOfferView(
+            o.id(),
+            o.archetype().displayName(),
+            o.tier().name(),
+            o.requestItemId(),
+            o.requestCount(),
+            o.paymentEmeralds(),
+            daysRemaining,
+            o.flavorBlurb()
+         ));
+      }
+
       PacketDistributor.sendToPlayer(player, new TownStateUpdatePayload(
          town.getBlockPos().asLong(),
          data.townName(),
@@ -621,6 +641,7 @@ public final class TownAdminService {
          resourceLocs,
          targetsOut,
          parcelSummaries,
+         tradeOffersOut,
          populationAliveTally,
          data.villagers().size(),
          tradePostCount,
