@@ -89,7 +89,7 @@ public final class TownAdminScreen extends Screen {
          Math.round(Math.max(tl.y, br.y)));
    }
 
-   private enum Tab { OVERVIEW, VILLAGERS, RESOURCES, PARCELS, ECONOMY, TASKS, LOG }
+   private enum Tab { OVERVIEW, VILLAGERS, RESOURCES, PARCELS, TASKS, LOG }
    private enum Mode { NORMAL, SPAWN_FORM, VILLAGER_DETAIL, MEMORIES, BELIEFS_FULL, VILLAGER_LOG }
 
    private TownStateUpdatePayload state;
@@ -99,7 +99,6 @@ public final class TownAdminScreen extends Screen {
     *  so resizing the screen rebinds bounds without losing scroll position
     *  between frames. */
    private UiList<TownStateUpdatePayload.VillagerSummary> villagersList;
-   private UiList<java.util.Map.Entry<String, Integer>> economyList;
    // ── New for redesigned tabs ──
    /** Row-level scroll offset for the Resources grid. Driven by the
     *  mouse wheel; clamped at render time once the row count is known. */
@@ -230,7 +229,6 @@ public final class TownAdminScreen extends Screen {
                case VILLAGERS -> initVillagersTabWidgets(paneL, paneR, contentTop, contentBottom);
                case RESOURCES -> initResourcesTabWidgets(paneL, paneR, contentTop, contentBottom);
                case PARCELS -> {} // render-only
-               case ECONOMY -> {} // render-only
                case TASKS -> initTasksTabWidgets(paneL, paneR, contentTop, contentBottom);
                case LOG -> {} // no widgets, render only
             }
@@ -735,7 +733,6 @@ public final class TownAdminScreen extends Screen {
          if (clickedTab != null) {
             this.tab = clickedTab;
             this.scrollOffset = 0;
-            if (this.economyList != null) this.economyList.resetScroll();
             this.resourcesGridScrollRows = 0;
             rebuildAdminWidgets();
             return true;
@@ -847,8 +844,6 @@ public final class TownAdminScreen extends Screen {
       }
       if (this.mode == Mode.NORMAL && this.tab == Tab.PARCELS && this.parcelsList != null
           && this.parcelsList.onMouseScrolled(mouseX, mouseY, scrollY)) return true;
-      if (this.mode == Mode.NORMAL && this.tab == Tab.ECONOMY && this.economyList != null
-          && this.economyList.onMouseScrolled(mouseX, mouseY, scrollY)) return true;
       if (this.mode == Mode.NORMAL && this.tab == Tab.TASKS) {
          this.tasksScrollOffset = Math.max(0, this.tasksScrollOffset - (int) (scrollY * 18));
          rebuildAdminWidgets();
@@ -945,7 +940,6 @@ public final class TownAdminScreen extends Screen {
                case VILLAGERS -> renderVillagersTab(graphics, l, r, contentTop, contentBottom, lmX, lmY);
                case RESOURCES -> renderResourcesTab(graphics, l, r, contentTop, contentBottom, lmX, lmY);
                case PARCELS -> renderParcelsTab(graphics, l, r, contentTop, contentBottom, lmX, lmY);
-               case ECONOMY -> renderEconomyTab(graphics, l, r, contentTop, contentBottom, lmX, lmY);
                case TASKS -> renderTasksTab(graphics, l, r, contentTop, contentBottom);
                case LOG -> renderLogTab(graphics, l, r, contentTop, contentBottom);
             }
@@ -999,7 +993,6 @@ public final class TownAdminScreen extends Screen {
          UiTabs.tab(Tab.VILLAGERS, "Villagers (" + this.state.populationAlive() + ")", 92),
          UiTabs.tab(Tab.RESOURCES, "Resources (" + this.state.aggregateResources().size() + ")", 96),
          UiTabs.tab(Tab.PARCELS,   "Parcels (" + this.state.parcels().size() + ")", 80),
-         UiTabs.tab(Tab.ECONOMY,   "Economy", 60),
          UiTabs.tab(Tab.TASKS,     "Tasks (" + openTodoCount + ")", 64),
          UiTabs.tab(Tab.LOG,       "Activity", 58)
       );
@@ -1172,41 +1165,6 @@ public final class TownAdminScreen extends Screen {
             rowY += rowH;
          }
       }
-   }
-
-   // ───────── Economy tab ─────────
-
-   private void renderEconomyTab(GuiGraphics graphics, int paneL, int paneR, int top, int bottom,
-                                 int mouseX, int mouseY) {
-      int innerL = paneL + UiTheme.PADDING;
-      int innerR = paneR - UiTheme.PADDING;
-      int contentTop = top + 10;
-      UiText.rightFaint(graphics, this.font, "summed across all residents",
-         innerR, contentTop);
-
-      java.util.LinkedHashMap<String, Integer> totals = new java.util.LinkedHashMap<>();
-      for (var v : this.state.villagers())
-         for (var ic : v.inventory()) totals.merge(ic.itemId(), ic.count(), Integer::sum);
-      List<java.util.Map.Entry<String, Integer>> sorted = new java.util.ArrayList<>(totals.entrySet());
-      sorted.sort((a, b) -> Integer.compare(b.getValue(), a.getValue()));
-
-      int listTop = contentTop + 14;
-      int listBottom = bottom;
-      if (sorted.isEmpty()) {
-         UiText.faint(graphics, this.font, "no items carried by any villager yet",
-            innerL, listTop + 10);
-         return;
-      }
-
-      final int maxCount = sorted.get(0).getValue();
-      if (this.economyList == null) {
-         this.economyList = new UiList<>(innerL, listTop, innerR - innerL, listBottom - listTop, 16,
-            row -> renderEconomyRow(row, maxCount));
-      } else {
-         this.economyList.setBounds(innerL, listTop, innerR - innerL, listBottom - listTop);
-      }
-      this.economyList.setItems(sorted);
-      this.economyList.render(graphics, mouseX, mouseY);
    }
 
    // ───────── Resources tab (icon grid + popup drill-down) ─────────
@@ -1671,36 +1629,6 @@ public final class TownAdminScreen extends Screen {
          }
       }
       UiText.faint(g, this.font, content.toString(), x + 6, y + 16);
-   }
-
-   private void renderEconomyRow(UiList.Row<java.util.Map.Entry<String, Integer>> row, int maxCount) {
-      var entry = row.item();
-      String name = shortItemName(entry.getKey());
-      UiText.body(row.g(), this.font, name, row.x() + 4, row.y() + 4);
-
-      int barCol = row.x() + 130;
-      int barMaxW = row.w() - 130 - 50;
-      UiBar.draw(row.g(), barCol, row.y() + 3, barMaxW, 8, entry.getValue(), maxCount, UiTheme.MUTED);
-
-      UiText.rightHeading(row.g(), this.font,
-         String.valueOf(entry.getValue()), row.x() + row.w() - 4, row.y() + 4);
-
-      // Inline top carrier hint to the right of the item name.
-      String topCarrier = null;
-      int topCarrierN = 0;
-      for (var v : this.state.villagers()) {
-         for (var ic : v.inventory()) {
-            if (ic.itemId().equals(entry.getKey()) && ic.count() > topCarrierN) {
-               topCarrierN = ic.count();
-               topCarrier = v.name();
-            }
-         }
-      }
-      if (topCarrier != null) {
-         UiText.faint(row.g(), this.font,
-            "(" + topCarrier + ")",
-            row.x() + 4 + this.font.width(name) + 6, row.y() + 4);
-      }
    }
 
    private void renderVillagersTab(GuiGraphics graphics, int paneL, int paneR,
