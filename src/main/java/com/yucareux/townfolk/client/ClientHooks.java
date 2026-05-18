@@ -58,5 +58,10 @@ public final class ClientHooks {
          payload.sizeX(), payload.sizeZ()));
    }
 
+   public static void openAnimalPlanScreen(com.yucareux.townfolk.network.OpenAnimalPlanPayload payload) {
+      Minecraft mc = Minecraft.getInstance();
+      mc.setScreen(new com.yucareux.townfolk.client.screen.AnimalPlanScreen(payload));
+   }
+
    private ClientHooks() {}
 }

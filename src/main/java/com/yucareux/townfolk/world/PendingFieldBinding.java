@@ -264,10 +264,12 @@ public final class PendingFieldBinding {
       villager.setData(ModRegistries.LLM_VILLAGER.get(), comp.withoutParcel(match.id()));
       // Cancel any block task whose target lies in the removed parcel.
       BlockTaskQueue.cancel(villager.getUUID());
-      // Drop the crop plan too so the registry doesn't accumulate
+      // Drop the per-parcel plans (PLANT-side crop plan and
+      // ANIMAL-side breed-up plan) so the registries don't accumulate
       // dead entries every time a parcel is rebuilt.
       if (player.serverLevel() != null) {
          com.yucareux.townfolk.town.CropPlanRegistry.forget(player.serverLevel(), match.id());
+         com.yucareux.townfolk.town.AnimalPlanRegistry.forget(player.serverLevel(), match.id());
       }
       String name = villager.hasCustomName() ? villager.getCustomName().getString() : "the villager";
       player.sendSystemMessage(Component.literal(

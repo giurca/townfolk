@@ -1052,13 +1052,17 @@ public final class TownAdminScreen extends Screen {
             }
          }
          if (this.tab == Tab.PARCELS && this.parcelsList != null) {
-            // Click a parcel row → ask the server to open the crop-plan
-            // editor for that parcel id. PLANT parcels only — ANIMAL
-            // parcels have no plan UI yet, so just swallow the click.
+            // Click a parcel row → ask the server to open the appropriate
+            // editor: crop-plan for PLANT, animal-plan for ANIMAL.
             var hit = this.parcelsList.itemAt(mouseX, mouseY);
             if (hit != null && "PLANT".equals(hit.type())) {
                PacketDistributor.sendToServer(
                   AdminActionPayload.openParcelEditor(townPos(), hit.id()));
+               return true;
+            }
+            if (hit != null && "ANIMAL".equals(hit.type())) {
+               PacketDistributor.sendToServer(
+                  AdminActionPayload.openAnimalPlan(townPos(), hit.id()));
                return true;
             }
             if (hit != null) return true;

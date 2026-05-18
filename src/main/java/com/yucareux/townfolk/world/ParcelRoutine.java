@@ -342,11 +342,26 @@ public final class ParcelRoutine {
       String pid = parcel.id();
       String actor = ctx.entry().name();
 
+      // Per-parcel plan: gates breeding (Stage 5). HARVEST tasks
+      // (shear, milk) are unconditional — they're triggered by the
+      // animal's own readiness, and capping them belongs to the
+      // ProductionTargets system. BREED is the only behaviour the
+      // animal-plan governs.
+      com.yucareux.townfolk.town.AnimalPlan plan =
+         com.yucareux.townfolk.town.AnimalPlanRegistry.find(level, parcel.id());
+
       StringBuilder trace = new StringBuilder();
       for (var task : com.yucareux.townfolk.world.livestock.LivestockTasks.ALL) {
          boolean hasTool = task.hasTool(ctx.actor());
          trace.append(task.id()).append("(tool=").append(hasTool).append(") ");
          if (!hasTool) continue;
+         // BREED gating: skip the task entirely unless the plan opts
+         // this species into BREED_UP AND we're still below target.
+         if (task.verb().equals("breed")
+             && !breedAllowedFor(level, parcel, task, plan)) {
+            trace.append("[plan-gated] ");
+            continue;
+         }
          var target = task.findReadyTargetIn(level, parcel, ctx.actor());
          if (target == null) continue;
          VerboseLog.write("PARCEL_PICK", "actor=" + actor + " parcel=" + pid
@@ -358,6 +373,54 @@ public final class ParcelRoutine {
       VerboseLog.write("PARCEL_PICK_NONE", "actor=" + actor + " parcel=" + pid
          + " type=ANIMAL", "candidates: " + trace.toString().trim());
       return false;
+   }
+
+   /** True iff the parcel's {@link com.yucareux.townfolk.town.AnimalPlan}
+    *  permits this breed task right now (mode = BREED_UP, current count
+    *  below target). Returns false if the plan has no entry for the
+    *  task's species — meaning the player hasn't opted this species in.
+    *
+    *  <p>Counts all alive entities of the species inside the parcel's
+    *  AABB (adults + babies), so a parcel with 6 adult cows + 2 calves
+    *  reads "8 cows" against the target — which keeps breeding from
+    *  overshooting while juvenile animals are still maturing.
+    */
+   private static boolean breedAllowedFor(net.minecraft.server.level.ServerLevel level,
+                                          FieldRegion parcel,
+                                          com.yucareux.townfolk.world.livestock.LivestockTask task,
+                                          com.yucareux.townfolk.town.AnimalPlan plan) {
+      // Resolve the task's target class back to an entity-type id.
+      Class<? extends net.minecraft.world.entity.animal.Animal> cls = task.targetType();
+      String speciesId = speciesIdFor(cls);
+      if (speciesId == null) return false;
+
+      var entry = plan.findSpecies(speciesId);
+      if (entry.isEmpty()) return false;
+      if (entry.get().mode() != com.yucareux.townfolk.town.AnimalPlan.Mode.BREED_UP) return false;
+      int target = entry.get().targetCount();
+      if (target <= 0) return false;
+
+      // Count current population (adults + babies).
+      var mn = parcel.scanMin(); var mx = parcel.scanMax();
+      var aabb = new net.minecraft.world.phys.AABB(
+         mn.getX(), mn.getY(), mn.getZ(),
+         mx.getX() + 1, mx.getY() + 1, mx.getZ() + 1);
+      int now = level.getEntitiesOfClass(cls, aabb,
+         a -> a.isAlive()).size();
+      return now < target;
+   }
+
+   /** Map a livestock class to its vanilla entity-type id. Returns
+    *  {@code null} for classes we don't know about — those will never
+    *  be gated, which is fine since only Stage-5-listed species have
+    *  BreedTasks in {@link com.yucareux.townfolk.world.livestock.LivestockTasks}. */
+   private static String speciesIdFor(Class<? extends net.minecraft.world.entity.animal.Animal> cls) {
+      if (cls == net.minecraft.world.entity.animal.Cow.class)     return "minecraft:cow";
+      if (cls == net.minecraft.world.entity.animal.Sheep.class)   return "minecraft:sheep";
+      if (cls == net.minecraft.world.entity.animal.Pig.class)     return "minecraft:pig";
+      if (cls == net.minecraft.world.entity.animal.Chicken.class) return "minecraft:chicken";
+      if (cls == net.minecraft.world.entity.animal.Rabbit.class)  return "minecraft:rabbit";
+      return null;
    }
 
    /** Generic enqueue for any {@link com.yucareux.townfolk.world.livestock.LivestockTask}.

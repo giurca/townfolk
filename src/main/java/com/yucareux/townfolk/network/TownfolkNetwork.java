@@ -130,6 +130,59 @@ public final class TownfolkNetwork {
          FulfillTradePayload.STREAM_CODEC,
          TownfolkNetwork::onFulfillTrade
       );
+
+      // Animal Plan modal: server opens the modal via OpenAnimalPlanPayload
+      // (S→C), client commits the entries via SetAnimalPlanPayload (C→S).
+      registrar.playToClient(
+         OpenAnimalPlanPayload.TYPE,
+         OpenAnimalPlanPayload.STREAM_CODEC,
+         TownfolkNetwork::onOpenAnimalPlan
+      );
+      registrar.playToServer(
+         SetAnimalPlanPayload.TYPE,
+         SetAnimalPlanPayload.STREAM_CODEC,
+         TownfolkNetwork::onSetAnimalPlan
+      );
+   }
+
+   private static void onOpenAnimalPlan(OpenAnimalPlanPayload payload, IPayloadContext ctx) {
+      // Client-side: hand off to the screen opener. Loaded via reflection-
+      // free direct call so the server jar doesn't try to load client
+      // classes.
+      if (FMLEnvironment.dist == Dist.CLIENT) {
+         ctx.enqueueWork(() -> com.yucareux.townfolk.client.ClientHooks.openAnimalPlanScreen(payload));
+      }
+   }
+
+   private static void onSetAnimalPlan(SetAnimalPlanPayload payload, IPayloadContext ctx) {
+      ctx.enqueueWork(() -> {
+         if (!(ctx.player() instanceof net.minecraft.server.level.ServerPlayer sp)) return;
+         net.minecraft.server.level.ServerLevel level = sp.serverLevel();
+         net.minecraft.core.BlockPos townPos = net.minecraft.core.BlockPos.of(payload.townSquarePos());
+         if (!isAuthorisedTownAdmin(sp, level, townPos)) {
+            com.yucareux.townfolk.diag.VerboseLog.write("ANIMAL_PLAN_REJECT",
+               "player=" + sp.getName().getString()
+                  + " reason=unauthorised town=" + townPos.toShortString(), "");
+            return;
+         }
+         java.util.List<com.yucareux.townfolk.town.AnimalPlan.Entry> entries = new java.util.ArrayList<>();
+         for (var raw : payload.entries()) {
+            com.yucareux.townfolk.town.AnimalPlan.Mode mode =
+               com.yucareux.townfolk.town.AnimalPlan.Mode.safeFromName(raw.mode());
+            if (mode == null) mode = com.yucareux.townfolk.town.AnimalPlan.Mode.HOLD;
+            // Skip entries with target 0 + Hold — that's just a no-op,
+            // and persisting it wastes a row in the saved plan.
+            if (raw.targetCount() <= 0 && mode == com.yucareux.townfolk.town.AnimalPlan.Mode.HOLD) continue;
+            entries.add(new com.yucareux.townfolk.town.AnimalPlan.Entry(
+               raw.speciesId(), raw.targetCount(), mode));
+         }
+         com.yucareux.townfolk.town.AnimalPlanRegistry.put(level, payload.parcelId(),
+            new com.yucareux.townfolk.town.AnimalPlan(entries));
+         com.yucareux.townfolk.diag.VerboseLog.write("ANIMAL_PLAN_SAVED",
+            "player=" + sp.getName().getString()
+               + " parcel=" + payload.parcelId()
+               + " entries=" + entries.size(), "");
+      });
    }
 
    private static void onFulfillTrade(FulfillTradePayload payload, IPayloadContext ctx) {

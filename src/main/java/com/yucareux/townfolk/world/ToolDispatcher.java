@@ -437,9 +437,11 @@ public final class ToolDispatcher {
       actor.setData(com.yucareux.townfolk.registry.ModRegistries.LLM_VILLAGER.get(),
          comp.withoutParcel(match.id()));
       BlockTaskQueue.cancel(actor.getUUID());
-      // Drop any crop plan keyed on this parcel id — the registry
-      // otherwise leaks entries every time a villager rebuilds a plot.
+      // Drop any per-parcel plan (crop or animal) keyed on this id —
+      // the registries otherwise leak entries every time a villager
+      // rebuilds a plot.
       com.yucareux.townfolk.town.CropPlanRegistry.forget(level, match.id());
+      com.yucareux.townfolk.town.AnimalPlanRegistry.forget(level, match.id());
       long day = level.getGameTime() / 24000L;
       String label = match.shortLabel(town.getBlockPos());
       String msg = self.name() + " dropped their claim to " + label;

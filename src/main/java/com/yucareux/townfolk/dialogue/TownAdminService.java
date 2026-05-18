@@ -72,36 +72,104 @@ public final class TownAdminService {
          case PIN_REMOVE -> pinRemove(player, level, town, action);
          case TODO_COMPLETE -> todoSetStatus(player, level, town, action, "done");
          case TODO_ABANDON -> todoSetStatus(player, level, town, action, "abandoned");
-         case OPEN_PARCEL_EDITOR -> {
-            String parcelId = action.factId();
-            if (parcelId == null || parcelId.isEmpty()) break;
-            // Verify the parcel exists in THIS town and is PLANT type. A
-            // hostile client could otherwise send an arbitrary parcel id
-            // and pop the crop-plan menu against it. Walk this town's
-            // villagers' parcels.
-            boolean isPlantInTown = false;
-            for (var entry : town.getTown().villagers()) {
-               if (!entry.alive()) continue;
-               var ent = level.getEntity(entry.uuid());
-               if (ent == null) continue;
-               var c = ent.getData(ModRegistries.LLM_VILLAGER.get());
-               for (var p : c.parcels()) {
-                  if (parcelId.equals(p.id())
-                      && p.type() == com.yucareux.townfolk.villager.FieldRegion.Type.PLANT) {
-                     isPlantInTown = true;
-                     break;
-                  }
-               }
-               if (isPlantInTown) break;
-            }
-            if (isPlantInTown) {
-               com.yucareux.townfolk.world.PendingFieldBinding.openCropPlanScreen(player, parcelId);
-            } else {
-               com.yucareux.townfolk.diag.VerboseLog.write("ADMIN_ACTION_REJECT",
-                  "reason=parcel-not-plant-or-not-in-town parcelId=" + parcelId, "");
-            }
+         case OPEN_PARCEL_EDITOR -> openParcelEditor(player, level, town, action.factId());
+         case OPEN_ANIMAL_PLAN  -> openAnimalPlan(player, level, town, action.factId());
+      }
+   }
+
+   /** Locate a parcel by id within this town, returning the parcel
+    *  itself (so the caller has access to type, bounds, etc.) or null
+    *  if no such parcel exists for this town. */
+   private static com.yucareux.townfolk.villager.FieldRegion findParcelInTown(
+         ServerLevel level, TownSquareBlockEntity town, String parcelId) {
+      if (parcelId == null || parcelId.isEmpty()) return null;
+      for (var entry : town.getTown().villagers()) {
+         if (!entry.alive()) continue;
+         var ent = level.getEntity(entry.uuid());
+         if (ent == null) continue;
+         var c = ent.getData(ModRegistries.LLM_VILLAGER.get());
+         for (var p : c.parcels()) {
+            if (parcelId.equals(p.id())) return p;
          }
       }
+      return null;
+   }
+
+   private static void openParcelEditor(ServerPlayer player, ServerLevel level,
+                                         TownSquareBlockEntity town, String parcelId) {
+      var parcel = findParcelInTown(level, town, parcelId);
+      if (parcel == null || parcel.type() != com.yucareux.townfolk.villager.FieldRegion.Type.PLANT) {
+         com.yucareux.townfolk.diag.VerboseLog.write("ADMIN_ACTION_REJECT",
+            "reason=parcel-not-plant-or-not-in-town parcelId=" + parcelId, "");
+         return;
+      }
+      com.yucareux.townfolk.world.PendingFieldBinding.openCropPlanScreen(player, parcelId);
+   }
+
+   /** Build the animal-plan census for one ANIMAL parcel and open the
+    *  modal client-side. Walks every adult+baby of every known farm
+    *  species inside the parcel's AABB; tallies counts; joins with
+    *  the saved plan so the modal renders with the player's previous
+    *  settings pre-filled. */
+   private static void openAnimalPlan(ServerPlayer player, ServerLevel level,
+                                       TownSquareBlockEntity town, String parcelId) {
+      var parcel = findParcelInTown(level, town, parcelId);
+      if (parcel == null || parcel.type() != com.yucareux.townfolk.villager.FieldRegion.Type.ANIMAL) {
+         com.yucareux.townfolk.diag.VerboseLog.write("ADMIN_ACTION_REJECT",
+            "reason=parcel-not-animal-or-not-in-town parcelId=" + parcelId, "");
+         return;
+      }
+      // Species we know how to count. Stage-5 keeps this list narrow —
+      // the entities our herders interact with via livestock tasks.
+      String[] speciesIds = {
+         "minecraft:cow", "minecraft:sheep",
+         "minecraft:pig", "minecraft:chicken",
+         "minecraft:rabbit", "minecraft:goat"
+      };
+
+      var mn = parcel.scanMin(); var mx = parcel.scanMax();
+      var aabb = new net.minecraft.world.phys.AABB(
+         mn.getX(), mn.getY(), mn.getZ(),
+         mx.getX() + 1, mx.getY() + 1, mx.getZ() + 1);
+
+      com.yucareux.townfolk.town.AnimalPlan savedPlan =
+         com.yucareux.townfolk.town.AnimalPlanRegistry.find(level, parcelId);
+
+      java.util.ArrayList<com.yucareux.townfolk.network.OpenAnimalPlanPayload.SpeciesView> rows
+         = new java.util.ArrayList<>();
+      for (String speciesId : speciesIds) {
+         net.minecraft.resources.ResourceLocation rl =
+            net.minecraft.resources.ResourceLocation.tryParse(speciesId);
+         if (rl == null) continue;
+         var type = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.get(rl);
+         if (type == null) continue;
+         @SuppressWarnings("unchecked")
+         var entities = level.getEntitiesOfClass(
+            (Class<net.minecraft.world.entity.animal.Animal>)(Class<?>) net.minecraft.world.entity.animal.Animal.class,
+            aabb,
+            a -> a.isAlive() && a.getType() == type);
+         if (entities.isEmpty()) {
+            // Only include species with at least one present OR with a saved plan entry.
+            var savedEntry = savedPlan.findSpecies(speciesId);
+            if (savedEntry.isEmpty()) continue;
+         }
+         int adults = 0, babies = 0;
+         for (var e : entities) {
+            if (e.isBaby()) babies++; else adults++;
+         }
+         var savedEntry = savedPlan.findSpecies(speciesId);
+         int target = savedEntry.map(com.yucareux.townfolk.town.AnimalPlan.Entry::targetCount).orElse(0);
+         String mode = savedEntry.map(e -> e.mode().name()).orElse(com.yucareux.townfolk.town.AnimalPlan.Mode.HOLD.name());
+         rows.add(new com.yucareux.townfolk.network.OpenAnimalPlanPayload.SpeciesView(
+            speciesId, adults + babies, babies, target, mode));
+      }
+
+      net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(player,
+         new com.yucareux.townfolk.network.OpenAnimalPlanPayload(
+            parcelId, town.getBlockPos().asLong(), rows));
+      com.yucareux.townfolk.diag.VerboseLog.write("ANIMAL_PLAN_OPEN",
+         "player=" + player.getName().getString() + " parcel=" + parcelId
+            + " species=" + rows.size(), "");
    }
 
    private static void todoSetStatus(ServerPlayer player, ServerLevel level,

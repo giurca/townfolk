@@ -39,7 +39,8 @@ public record AdminActionPayload(
       PIN_REMOVE,        // factId (+ villagerUuid for personal)
       TODO_COMPLETE,     // villagerUuid, factId (= todo id); marks status=done
       TODO_ABANDON,      // villagerUuid, factId (= todo id); marks status=abandoned
-      OPEN_PARCEL_EDITOR // factId = parcel id; opens CropPlanScreen for that parcel
+      OPEN_PARCEL_EDITOR, // factId = parcel id; opens CropPlanScreen for that parcel
+      OPEN_ANIMAL_PLAN    // factId = parcel id; opens AnimalPlanScreen for that ANIMAL parcel
    }
 
    public static final Type<AdminActionPayload> TYPE =
@@ -133,5 +134,8 @@ public record AdminActionPayload(
    }
    public static AdminActionPayload openParcelEditor(long pos, String parcelId) {
       return of(pos, Action.OPEN_PARCEL_EDITOR, Optional.empty(), "", "", "", parcelId, "", "");
+   }
+   public static AdminActionPayload openAnimalPlan(long pos, String parcelId) {
+      return of(pos, Action.OPEN_ANIMAL_PLAN, Optional.empty(), "", "", "", parcelId, "", "");
    }
 }
