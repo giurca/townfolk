@@ -27,6 +27,7 @@ public final class TownData {
    private int defaultRadius;
    private final List<VillagerEntry> villagers;
    private final List<PinnedFact> townFacts;
+   private final List<TownAuxiliaryEntry> auxiliaries;
    private final TownLog log = new TownLog();
 
    // Daily exchange caps — reset at day rollover.
@@ -42,6 +43,7 @@ public final class TownData {
       this.defaultRadius = 64;
       this.villagers = new ArrayList<>();
       this.townFacts = new ArrayList<>();
+      this.auxiliaries = new ArrayList<>();
    }
 
    private static String pairKey(UUID a, UUID b) {
@@ -124,6 +126,48 @@ public final class TownData {
       }
    }
 
+   // ───── Auxiliary block registry ─────
+
+   /** Live view of registered auxiliary blocks. Read-only — mutate via
+    *  {@link #addAuxiliary} / {@link #removeAuxiliaryAt}. */
+   public List<TownAuxiliaryEntry> auxiliaries() {
+      return java.util.Collections.unmodifiableList(this.auxiliaries);
+   }
+
+   /** Register an auxiliary block. If an entry already exists at this
+    *  position, it's replaced (e.g. block-state change). Returns true
+    *  iff this was a new registration (vs. a replace). */
+   public boolean addAuxiliary(TownAuxiliaryEntry entry) {
+      // De-dupe by position. Two blocks can't occupy the same pos, so
+      // pos is a sufficient natural key.
+      for (int i = 0; i < this.auxiliaries.size(); i++) {
+         if (this.auxiliaries.get(i).pos().equals(entry.pos())) {
+            this.auxiliaries.set(i, entry);
+            return false;
+         }
+      }
+      this.auxiliaries.add(entry);
+      return true;
+   }
+
+   /** Deregister whichever auxiliary block sits at {@code pos}. Returns
+    *  true if something was removed. Idempotent. */
+   public boolean removeAuxiliaryAt(BlockPos pos) {
+      Iterator<TownAuxiliaryEntry> it = this.auxiliaries.iterator();
+      while (it.hasNext()) {
+         if (it.next().pos().equals(pos)) { it.remove(); return true; }
+      }
+      return false;
+   }
+
+   /** True iff at least one registered auxiliary block has the given
+    *  type. Used to gate UI features like "Trade tab visible only if
+    *  the town has at least one Trade Post." */
+   public boolean hasAuxiliaryOfType(TownAuxiliaryType type) {
+      for (TownAuxiliaryEntry e : this.auxiliaries) if (e.type() == type) return true;
+      return false;
+   }
+
    public CompoundTag save() {
       CompoundTag tag = new CompoundTag();
       tag.putString("townName", this.townName);
@@ -142,6 +186,15 @@ public final class TownData {
          flist.add(fc);
       }
       tag.put("townFacts", flist);
+      ListTag alist = new ListTag();
+      for (TownAuxiliaryEntry e : this.auxiliaries) {
+         CompoundTag ec = new CompoundTag();
+         ec.putLong("pos", e.pos().asLong());
+         ec.putString("type", e.type().name());
+         ec.putLong("registeredAt", e.registeredAtTick());
+         alist.add(ec);
+      }
+      tag.put("auxiliaries", alist);
       return tag;
    }
 
@@ -152,6 +205,22 @@ public final class TownData {
       if (tag.contains("villagers")) {
          ListTag list = tag.getList("villagers", Tag.TAG_COMPOUND);
          for (int i = 0; i < list.size(); i++) this.villagers.add(VillagerEntry.load(list.getCompound(i)));
+      }
+      this.auxiliaries.clear();
+      if (tag.contains("auxiliaries")) {
+         ListTag list = tag.getList("auxiliaries", Tag.TAG_COMPOUND);
+         for (int i = 0; i < list.size(); i++) {
+            CompoundTag ec = list.getCompound(i);
+            // safeFromName returns null for unknown / removed types —
+            // skip silently so an old save with a deprecated aux kind
+            // still loads cleanly.
+            TownAuxiliaryType type = TownAuxiliaryType.safeFromName(ec.getString("type"));
+            if (type == null) continue;
+            this.auxiliaries.add(new TownAuxiliaryEntry(
+               BlockPos.of(ec.getLong("pos")),
+               type,
+               ec.contains("registeredAt") ? ec.getLong("registeredAt") : 0L));
+         }
       }
       this.townFacts.clear();
       if (tag.contains("townFacts")) {

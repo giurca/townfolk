@@ -43,16 +43,20 @@ public class TownSquareBlockEntity extends BlockEntity {
    }
 
    /**
-    * Build a fresh {@link TownCoverage} snapshot for this town. Currently
-    * a single disk around the master block at {@code defaultRadius}. Stage
-    * 1.3 extends this to merge in registered auxiliary blocks' disks.
+    * Build a fresh {@link TownCoverage} snapshot: a disk around the
+    * master block plus one disk per registered auxiliary block.
     *
-    * <p>Cheap to call — coverage is a tiny immutable record. Callers
+    * <p>Cheap to call — coverage is a small immutable list. Callers
     * should not cache it across town-data changes (additions / removals
     * of source blocks); just rebuild when needed.
     */
    public TownCoverage coverage() {
-      return TownCoverage.of(this.town, this.getBlockPos());
+      java.util.List<TownCoverage.Disk> disks = new java.util.ArrayList<>();
+      disks.add(new TownCoverage.Disk(this.getBlockPos(), this.town.defaultRadius()));
+      for (var aux : this.town.auxiliaries()) {
+         disks.add(aux.disk());
+      }
+      return TownCoverage.of(disks);
    }
 
    @Override
