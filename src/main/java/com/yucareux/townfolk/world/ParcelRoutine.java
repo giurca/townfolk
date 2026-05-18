@@ -581,10 +581,111 @@ public final class ParcelRoutine {
       for (var task : com.yucareux.townfolk.world.livestock.LivestockTasks.TOOL_FETCH) {
          out.add(new LivestockToolNeed(task));
       }
+      // Breeding food fetch — separate from LivestockTasks.TOOL_FETCH
+      // because Breed tasks query Animal.isFood() dynamically and
+      // don't expose a fixed tool id. Without this need, a herder
+      // with active BREED_UP plans but no wheat/carrot in their bag
+      // sits idle indefinitely even though storage has the food.
+      out.add(new BreedFoodNeed());
       out.add(new HoeNeed());
       out.add(new SeedNeed());
       // Future: new AxeNeed(), new PickaxeNeed(), new RodNeed(), …
       return java.util.Collections.unmodifiableList(out);
+   }
+
+   /** Primary breeding food per species. Used by {@link BreedFoodNeed}
+    *  to pull the right item from town storage when an ANIMAL parcel
+    *  has an active BREED_UP plan but the herder has run out of food.
+    *  Returns {@code null} for species we don't have a Stage-5 BreedTask
+    *  for — they're not subject to the player's plan gate. */
+   private static String primaryBreedFood(String speciesId) {
+      return switch (speciesId) {
+         case "minecraft:cow", "minecraft:sheep" -> "minecraft:wheat";
+         case "minecraft:pig"                    -> "minecraft:carrot";
+         case "minecraft:chicken"                -> "minecraft:wheat_seeds";
+         case "minecraft:rabbit"                 -> "minecraft:carrot";
+         default                                 -> null;
+      };
+   }
+
+   private static boolean bagHasItem(net.minecraft.world.entity.npc.Villager v, String itemId) {
+      var item = BuiltInRegistries.ITEM.get(
+         net.minecraft.resources.ResourceLocation.parse(itemId));
+      var inv = v.getInventory();
+      for (int i = 0; i < inv.getContainerSize(); i++) {
+         var s = inv.getItem(i);
+         if (!s.isEmpty() && s.getItem() == item) return true;
+      }
+      return false;
+   }
+
+   /** Auto-fetch breeding food for any ANIMAL parcel with an active
+    *  BREED_UP plan whose population is below target. Walks the
+    *  herder's parcels, picks the first species in need, and routes
+    *  a {@code withdraw} verb for that species' primary food via
+    *  the existing treasury-routing path. */
+   private static final class BreedFoodNeed implements WorkNeed {
+      @Override public String id() { return "breed_food"; }
+
+      @Override public boolean wanted(WorkProductionService.Ctx ctx) {
+         return findNeededFood(ctx) != null;
+      }
+
+      @Override public boolean tryFetch(WorkProductionService.Ctx ctx) {
+         String foodId = findNeededFood(ctx);
+         if (foodId == null) return false;
+         var item = BuiltInRegistries.ITEM.get(
+            net.minecraft.resources.ResourceLocation.parse(foodId));
+         var hit = com.yucareux.townfolk.town.TownTreasury.findNearestWith(
+            ctx.level(), ctx.actor().blockPosition(), item);
+         if (hit.isEmpty()) return false;
+         String path = foodId.substring(foodId.indexOf(':') + 1);
+         // Fetch a half-stack so the herder doesn't have to make a
+         // round trip per breed event. 16 is plenty for several
+         // breeding rounds; refetches happen automatically when the
+         // bag empties.
+         return fireFetch(ctx, path, 16);
+      }
+
+      /** Identify the species-food this herder needs right now. Returns
+       *  null when no breeding food is needed (no active plans, all at
+       *  target, no eligible pairs, bag already stocked). */
+      private static String findNeededFood(WorkProductionService.Ctx ctx) {
+         var level = ctx.level();
+         for (FieldRegion p : ctx.comp().parcels()) {
+            if (p.type() != FieldRegion.Type.ANIMAL) continue;
+            var plan = com.yucareux.townfolk.town.AnimalPlanRegistry.find(level, p.id());
+            for (var entry : plan.entries()) {
+               if (entry.mode() != com.yucareux.townfolk.town.AnimalPlan.Mode.BREED_UP) continue;
+               if (entry.targetCount() <= 0) continue;
+               String foodId = primaryBreedFood(entry.speciesId());
+               if (foodId == null) continue;
+               if (bagHasItem(ctx.actor(), foodId)) continue;  // already stocked
+
+               // Confirm there's breeding work waiting (population below
+               // target AND at least 2 adults to breed). Otherwise we'd
+               // fetch wheat for no reason.
+               var rl = net.minecraft.resources.ResourceLocation.tryParse(entry.speciesId());
+               if (rl == null) continue;
+               var type = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.get(rl);
+               if (type == null) continue;
+               var mn = p.scanMin(); var mx = p.scanMax();
+               var aabb = new net.minecraft.world.phys.AABB(
+                  mn.getX(), mn.getY(), mn.getZ(),
+                  mx.getX() + 1, mx.getY() + 1, mx.getZ() + 1);
+               int total = level.getEntitiesOfClass(
+                     net.minecraft.world.entity.animal.Animal.class, aabb,
+                     a -> a.isAlive() && a.getType() == type).size();
+               if (total >= entry.targetCount()) continue;
+               int adults = level.getEntitiesOfClass(
+                     net.minecraft.world.entity.animal.Animal.class, aabb,
+                     a -> a.isAlive() && !a.isBaby() && a.getType() == type).size();
+               if (adults < 2) continue;
+               return foodId;
+            }
+         }
+         return null;
+      }
    }
 
    /** Auto-fetch tool for a single {@link com.yucareux.townfolk.world.livestock.LivestockTask}.
