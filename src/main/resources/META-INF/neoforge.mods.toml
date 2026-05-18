@@ -1,0 +1,39 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "MIT"
+issueTrackerURL = "https://github.com/giurca/townfolk/issues"
+
+[[mods]]
+modId = "townfolk"
+version = "${version}"
+displayName = "Tellus Townfolk"
+authors = "giurca"
+description = '''
+AI-driven NPC villages for Tellus worlds. Place a Town Square block to anchor
+a settlement; spawn villagers from its UI, each with a persistent persona,
+memory, and relationships. Long-term goal: LLM-driven minds with traditional
+movement code; multi-agent social dynamics.
+
+This release: data layer scaffolding only. No LLM integration yet.
+'''
+
+[[dependencies.townfolk]]
+modId = "neoforge"
+type = "required"
+versionRange = "[21.1,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.townfolk]]
+modId = "minecraft"
+type = "required"
+versionRange = "[1.21.1,1.22)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.townfolk]]
+modId = "jade"
+type = "optional"
+versionRange = "[15,)"
+ordering = "AFTER"
+side = "CLIENT"

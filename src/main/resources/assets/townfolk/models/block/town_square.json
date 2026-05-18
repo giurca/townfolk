@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/cube_bottom_top",
+  "textures": {
+    "bottom": "townfolk:block/town_square_bottom",
+    "side": "townfolk:block/town_square_side",
+    "top": "townfolk:block/town_square_top"
+  }
+}

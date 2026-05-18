@@ -1,0 +1,110 @@
+plugins {
+	id 'net.neoforged.moddev' version '2.0.78'
+	id 'maven-publish'
+}
+
+def mcVersion = '1.21.1'
+def neoForgeVersion = '21.1.228'
+def parchmentMcVersion = '1.21.1'
+def parchmentMappings = '2024.11.17'
+def javaVersion = 21
+
+base {
+	archivesName = "${archives_base_name}-neoforge-${mcVersion}"
+}
+
+tasks.withType(AbstractArchiveTask).configureEach {
+	archiveVersion.set(mod_version)
+}
+
+repositories {
+	mavenCentral()
+	maven {
+		name = 'NeoForged'
+		url = 'https://maven.neoforged.net/releases'
+	}
+	maven {
+		name = 'ParchmentMC'
+		url = 'https://maven.parchmentmc.org'
+	}
+	maven {
+		// Jade — soft dependency. Used for tooltip injection only.
+		name = 'Modrinth'
+		url = 'https://api.modrinth.com/maven'
+		content { includeGroup 'maven.modrinth' }
+	}
+	maven {
+		// JEI — for ghost-drag onto storage filter slots.
+		name = 'BlameJared (JEI)'
+		url = 'https://maven.blamejared.com/'
+	}
+	maven {
+		// EMI — alternative recipe viewer, same ghost-drag pattern.
+		name = 'TerraformersMC (EMI)'
+		url = 'https://maven.terraformersmc.com/'
+	}
+}
+
+dependencies {
+	// Jade API at compile time only; runtime presence is optional and gated
+	// by class-loading inside the plugin. Adjust the version if your dev
+	// environment has a different Jade build for NeoForge 1.21.1.
+	compileOnly 'maven.modrinth:jade:15.9.2+neoforge'
+
+	// JEI + EMI APIs at compile time only. Runtime presence is optional —
+	// each plugin class is annotation-scanned by its host mod and only
+	// loaded when that mod is installed. See compat/jei + compat/emi.
+	compileOnly 'mezz.jei:jei-1.21.1-neoforge-api:19.27.0.340'
+	compileOnly 'mezz.jei:jei-1.21.1-common-api:19.27.0.340'
+	compileOnly 'dev.emi:emi-neoforge:1.1.22+1.21.1:api'
+}
+
+neoForge {
+	version = neoForgeVersion
+
+	parchment {
+		minecraftVersion.set(parchmentMcVersion)
+		mappingsVersion.set(parchmentMappings)
+	}
+
+	runs {
+		client {
+			client()
+			gameDirectory = file('run/client')
+		}
+		server {
+			server()
+			gameDirectory = file('run/server')
+			programArgument '--nogui'
+		}
+	}
+
+	mods {
+		townfolk {
+			sourceSet sourceSets.main
+		}
+	}
+}
+
+processResources {
+	inputs.property 'version', mod_version
+
+	filesMatching('META-INF/neoforge.mods.toml') {
+		expand version: inputs.properties.version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	options.release = javaVersion
+}
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(javaVersion)
+	}
+
+	withSourcesJar()
+
+	sourceCompatibility = JavaVersion.toVersion(javaVersion)
+	targetCompatibility = JavaVersion.toVersion(javaVersion)
+}
