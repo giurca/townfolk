@@ -69,8 +69,13 @@ public final class BreedTask implements LivestockTask {
    @Override public boolean ready(ServerLevel level, Animal animal, Villager v) {
       if (animal.isBaby()) return false;
       if (!animal.canFallInLove()) return false;
-      // Bag must contain a food this animal accepts.
-      if (!bagHasFoodFor(v, animal)) return false;
+      // Bag must contain at least TWO of an accepted food — one per
+      // animal in the pair. Setting only ONE animal in love wastes the
+      // wheat: vanilla's Animal.canMate(other) requires BOTH to be in
+      // love before BreedGoal pairs them. So we never want to start a
+      // breed unless we can finish it. (This is the fix for the
+      // "villager spams wheat on the lone unpaired cow" symptom.)
+      if (bagFoodCountFor(v, animal) < 2) return false;
       // Need at least one other adult mate of the same species nearby.
       var around = new AABB(animal.getX() - PAIR_RADIUS, animal.getY() - 2, animal.getZ() - PAIR_RADIUS,
                             animal.getX() + PAIR_RADIUS, animal.getY() + 2, animal.getZ() + PAIR_RADIUS);
@@ -81,43 +86,87 @@ public final class BreedTask implements LivestockTask {
 
    @Override public String perform(ServerLevel level, Villager v, Animal animal,
                                    FieldRegion parcel, TownSquareBlockEntity town) {
-      var inv = v.getInventory();
-      int slot = -1;
-      ItemStack food = null;
-      for (int i = 0; i < inv.getContainerSize(); i++) {
-         ItemStack s = inv.getItem(i);
-         if (!s.isEmpty() && animal.isFood(s)) {
-            slot = i; food = s; break;
-         }
+      // Re-locate a partner now (the cow we found at ready-time may
+      // have wandered out of range during the walk). Without a
+      // partner there's nothing to do.
+      Animal partner = nearestAvailablePartner(level, animal);
+      if (partner == null) {
+         throw new RuntimeException("partner walked away before breed");
       }
-      if (slot < 0 || food == null) {
-         throw new RuntimeException("food gone before breed");
-      }
-      String foodName = food.getHoverName().getString();
-      inv.getItem(slot).shrink(1);
-      if (inv.getItem(slot).isEmpty()) inv.setItem(slot, ItemStack.EMPTY);
 
+      // Consume TWO portions of accepted food (one per animal — vanilla
+      // breeding pairs both via in-love state). Bag must hold two.
+      var inv = v.getInventory();
+      ItemStack any = null;
+      int consumed = 0;
+      for (int i = 0; i < inv.getContainerSize() && consumed < 2; i++) {
+         ItemStack s = inv.getItem(i);
+         if (s.isEmpty() || !animal.isFood(s)) continue;
+         if (any == null) any = s.copy();    // remember a name for the memory line
+         int take = Math.min(s.getCount(), 2 - consumed);
+         s.shrink(take);
+         if (s.isEmpty()) inv.setItem(i, ItemStack.EMPTY);
+         consumed += take;
+      }
+      if (consumed < 2 || any == null) {
+         throw new RuntimeException("food gone before breed (need 2)");
+      }
+      String foodName = any.getHoverName().getString();
+
+      // Set BOTH animals in love together. Vanilla's BreedGoal only
+      // fires when both partners satisfy Animal.canMate (both must be
+      // in love simultaneously). Setting just one wasted the wheat
+      // and looked like spam to the player.
       animal.setInLove(null);
+      partner.setInLove(null);
+
       level.sendParticles(net.minecraft.core.particles.ParticleTypes.HEART,
          animal.getX(), animal.getY() + animal.getBbHeight(), animal.getZ(),
          6, 0.2, 0.2, 0.2, 0);
+      level.sendParticles(net.minecraft.core.particles.ParticleTypes.HEART,
+         partner.getX(), partner.getY() + partner.getBbHeight(), partner.getZ(),
+         6, 0.2, 0.2, 0.2, 0);
 
-      String species = animal.getType().getDescription().getString().toLowerCase();
+      String speciesName = animal.getType().getDescription().getString().toLowerCase();
       long day = level.getGameTime() / 24000L;
       String parcelTag = parcel == null ? "this spot"
          : parcel.shortLabel(town.getBlockPos());
       MemoryStore.write(v, "work", day,
-         "At my " + parcelTag + " I fed a " + species + " " + foodName
+         "At my " + parcelTag + " I fed two " + speciesName + " " + foodName
             + " to get them to breed.");
-      return "fed a " + species + " " + foodName + " (breeding)";
+      return "fed two " + speciesName + " " + foodName + " (breeding pair)";
    }
 
-   private static boolean bagHasFoodFor(Villager v, Animal animal) {
+   /** Closest other adult of the same species within {@link #PAIR_RADIUS}
+    *  that can fall in love. Returns null if no eligible partner is
+    *  present. */
+   private Animal nearestAvailablePartner(ServerLevel level, Animal animal) {
+      var around = new AABB(
+         animal.getX() - PAIR_RADIUS, animal.getY() - 2, animal.getZ() - PAIR_RADIUS,
+         animal.getX() + PAIR_RADIUS, animal.getY() + 2, animal.getZ() + PAIR_RADIUS);
+      List<? extends Animal> mates = level.getEntitiesOfClass(species, around,
+         m -> m != animal && !m.isBaby() && m.canFallInLove());
+      if (mates.isEmpty()) return null;
+      Animal best = null;
+      double bestDsq = Double.MAX_VALUE;
+      for (Animal m : mates) {
+         double dsq = m.distanceToSqr(animal);
+         if (dsq < bestDsq) { bestDsq = dsq; best = m; }
+      }
+      return best;
+   }
+
+   /** Count items in the villager's bag that {@code animal} would
+    *  accept as breeding food. Used by {@link #ready} to gate on the
+    *  presence of TWO portions before we start a breed we can't
+    *  finish. */
+   private static int bagFoodCountFor(Villager v, Animal animal) {
+      int total = 0;
       var inv = v.getInventory();
       for (int i = 0; i < inv.getContainerSize(); i++) {
          ItemStack s = inv.getItem(i);
-         if (!s.isEmpty() && animal.isFood(s)) return true;
+         if (!s.isEmpty() && animal.isFood(s)) total += s.getCount();
       }
-      return false;
+      return total;
    }
 }

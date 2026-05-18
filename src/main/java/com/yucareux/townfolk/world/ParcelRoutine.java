@@ -609,15 +609,16 @@ public final class ParcelRoutine {
       };
    }
 
-   private static boolean bagHasItem(net.minecraft.world.entity.npc.Villager v, String itemId) {
+   private static int bagItemCount(net.minecraft.world.entity.npc.Villager v, String itemId) {
       var item = BuiltInRegistries.ITEM.get(
          net.minecraft.resources.ResourceLocation.parse(itemId));
       var inv = v.getInventory();
+      int total = 0;
       for (int i = 0; i < inv.getContainerSize(); i++) {
          var s = inv.getItem(i);
-         if (!s.isEmpty() && s.getItem() == item) return true;
+         if (!s.isEmpty() && s.getItem() == item) total += s.getCount();
       }
-      return false;
+      return total;
    }
 
    /** Auto-fetch breeding food for any ANIMAL parcel with an active
@@ -661,7 +662,10 @@ public final class ParcelRoutine {
                if (entry.targetCount() <= 0) continue;
                String foodId = primaryBreedFood(entry.speciesId());
                if (foodId == null) continue;
-               if (bagHasItem(ctx.actor(), foodId)) continue;  // already stocked
+               // Need at least 2 portions per breed (one per animal in
+               // the pair — vanilla requires both partners in love).
+               // Refetch when we're below that floor.
+               if (bagItemCount(ctx.actor(), foodId) >= 2) continue;
 
                // Confirm there's breeding work waiting (population below
                // target AND at least 2 adults to breed). Otherwise we'd
