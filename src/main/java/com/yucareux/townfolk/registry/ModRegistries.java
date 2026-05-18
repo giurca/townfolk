@@ -2,7 +2,9 @@ package com.yucareux.townfolk.registry;
 
 import com.yucareux.townfolk.Townfolk;
 import com.yucareux.townfolk.block.TownSquareBlock;
+import com.yucareux.townfolk.block.TradePostBlock;
 import com.yucareux.townfolk.blockentity.TownSquareBlockEntity;
+import com.yucareux.townfolk.blockentity.TradePostBlockEntity;
 import com.yucareux.townfolk.entity.LlmTownsfolk;
 import com.yucareux.townfolk.villager.LlmVillagerComponent;
 import java.util.function.Supplier;
@@ -100,6 +102,26 @@ public final class ModRegistries {
       BLOCK_ENTITIES.register(
          "town_square",
          () -> BlockEntityType.Builder.of(TownSquareBlockEntity::new, TOWN_SQUARE_BLOCK.get()).build(null)
+      );
+
+   public static final Supplier<TradePostBlock> TRADE_POST_BLOCK = BLOCKS.register(
+      "trade_post",
+      () -> new TradePostBlock(BlockBehaviour.Properties.of()
+         .mapColor(MapColor.WOOD)
+         .strength(2.0F, 4.0F)
+         .requiresCorrectToolForDrops()
+         .sound(SoundType.WOOD))
+   );
+
+   public static final Supplier<Item> TRADE_POST_ITEM = ITEMS.register(
+      "trade_post",
+      () -> new BlockItem(TRADE_POST_BLOCK.get(), new Item.Properties())
+   );
+
+   public static final Supplier<BlockEntityType<TradePostBlockEntity>> TRADE_POST_BE =
+      BLOCK_ENTITIES.register(
+         "trade_post",
+         () -> BlockEntityType.Builder.of(TradePostBlockEntity::new, TRADE_POST_BLOCK.get()).build(null)
       );
 
    public static void register(IEventBus modEventBus) {

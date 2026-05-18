@@ -1,0 +1,18 @@
+{
+  "_comment": "PAP / PSP / .S. — 4 planks (any), 1 paper, 2 smooth stone → 1 Trade Post. Cheap and early; the gates are on trade TIERS, not on having a Trade Post at all.",
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "PAP",
+    "PSP",
+    " S "
+  ],
+  "key": {
+    "P": { "tag": "minecraft:planks" },
+    "A": { "item": "minecraft:paper" },
+    "S": { "item": "minecraft:smooth_stone" }
+  },
+  "result": {
+    "id": "townfolk:trade_post",
+    "count": 1
+  }
+}

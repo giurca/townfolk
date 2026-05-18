@@ -1,0 +1,9 @@
+{
+  "_comment": "Placeholder texture set, using vanilla blocks. Replace with a custom wood-post + notice texture later.",
+  "parent": "minecraft:block/cube_bottom_top",
+  "textures": {
+    "top": "minecraft:block/oak_planks",
+    "bottom": "minecraft:block/smooth_stone",
+    "side": "minecraft:block/lectern_sides"
+  }
+}
