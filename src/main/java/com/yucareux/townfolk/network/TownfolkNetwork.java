@@ -121,6 +121,30 @@ public final class TownfolkNetwork {
          SetProductionTargetPayload.STREAM_CODEC,
          TownfolkNetwork::onSetProductionTarget
       );
+
+      // Trade tab → [Deliver] button. Server consumes the request from
+      // the player's inventory, pays out, applies prestige delta, marks
+      // the offer fulfilled.
+      registrar.playToServer(
+         FulfillTradePayload.TYPE,
+         FulfillTradePayload.STREAM_CODEC,
+         TownfolkNetwork::onFulfillTrade
+      );
+   }
+
+   private static void onFulfillTrade(FulfillTradePayload payload, IPayloadContext ctx) {
+      ctx.enqueueWork(() -> {
+         if (!(ctx.player() instanceof net.minecraft.server.level.ServerPlayer sp)) return;
+         net.minecraft.server.level.ServerLevel level = sp.serverLevel();
+         net.minecraft.core.BlockPos townPos = net.minecraft.core.BlockPos.of(payload.townSquarePos());
+         if (!isAuthorisedTownAdmin(sp, level, townPos)) {
+            com.yucareux.townfolk.diag.VerboseLog.write("TRADE_FULFILL_REJECT",
+               "player=" + sp.getName().getString()
+                  + " reason=unauthorised town=" + townPos.toShortString(), "");
+            return;
+         }
+         com.yucareux.townfolk.trade.TradeFulfillmentService.handle(sp, level, townPos, payload.offerId());
+      });
    }
 
    private static void onSetProductionTarget(SetProductionTargetPayload payload, IPayloadContext ctx) {
