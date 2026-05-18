@@ -340,6 +340,38 @@ public final class TownData {
       }
       tag.put("yesterdayStock", yest);
       tag.putLong("yesterdayStockDay", this.yesterdayStockDay);
+
+      // Daily exchange caps — persist so a relog can't reset a
+      // villager's exhausted-for-today counter and let them re-trade
+      // beyond the configured cap.
+      CompoundTag exch = new CompoundTag();
+      exch.putInt("totalToday", this.exchangesTotalToday);
+      exch.putLong("counterDay", this.exchangeCounterDay);
+      ListTag pairs = new ListTag();
+      for (var e : this.exchangesByPair.entrySet()) {
+         CompoundTag c = new CompoundTag();
+         c.putString("k", e.getKey());
+         c.putInt("v", e.getValue());
+         pairs.add(c);
+      }
+      exch.put("byPair", pairs);
+      ListTag perV = new ListTag();
+      for (var e : this.exchangesByVillager.entrySet()) {
+         CompoundTag c = new CompoundTag();
+         c.putUUID("u", e.getKey());
+         c.putInt("v", e.getValue());
+         perV.add(c);
+      }
+      exch.put("byVillager", perV);
+      ListTag lastPair = new ListTag();
+      for (var e : this.lastExchangeTickByPair.entrySet()) {
+         CompoundTag c = new CompoundTag();
+         c.putString("k", e.getKey());
+         c.putLong("t", e.getValue());
+         lastPair.add(c);
+      }
+      exch.put("lastTick", lastPair);
+      tag.put("exchanges", exch);
       return tag;
    }
 
@@ -414,6 +446,40 @@ public final class TownData {
                fc.contains("createdDay") ? fc.getLong("createdDay") : 0L,
                fc.contains("playerEdited") && fc.getBoolean("playerEdited")
             ));
+         }
+      }
+
+      // Daily exchange caps. Defaults match a fresh TownData if the
+      // save predates this field.
+      this.exchangesByPair.clear();
+      this.exchangesByVillager.clear();
+      this.lastExchangeTickByPair.clear();
+      this.exchangesTotalToday = 0;
+      this.exchangeCounterDay = 0L;
+      if (tag.contains("exchanges")) {
+         CompoundTag exch = tag.getCompound("exchanges");
+         this.exchangesTotalToday = exch.getInt("totalToday");
+         this.exchangeCounterDay = exch.getLong("counterDay");
+         if (exch.contains("byPair")) {
+            ListTag list = exch.getList("byPair", Tag.TAG_COMPOUND);
+            for (int i = 0; i < list.size(); i++) {
+               CompoundTag c = list.getCompound(i);
+               this.exchangesByPair.put(c.getString("k"), c.getInt("v"));
+            }
+         }
+         if (exch.contains("byVillager")) {
+            ListTag list = exch.getList("byVillager", Tag.TAG_COMPOUND);
+            for (int i = 0; i < list.size(); i++) {
+               CompoundTag c = list.getCompound(i);
+               this.exchangesByVillager.put(c.getUUID("u"), c.getInt("v"));
+            }
+         }
+         if (exch.contains("lastTick")) {
+            ListTag list = exch.getList("lastTick", Tag.TAG_COMPOUND);
+            for (int i = 0; i < list.size(); i++) {
+               CompoundTag c = list.getCompound(i);
+               this.lastExchangeTickByPair.put(c.getString("k"), c.getLong("t"));
+            }
          }
       }
    }

@@ -264,4 +264,22 @@ public final class AnimalPlanScreen extends Screen {
 
    @Override
    public boolean isPauseScreen() { return false; }
+
+   /**
+    * Escape: treat as Cancel (close without saving). Without this
+    * override, Mojang's base Screen.keyPressed routes Escape to
+    * {@code Minecraft.setScreen(null)} which closes this screen AND
+    * any underlying admin screen — surprising the player by dumping
+    * them back into the world. Cancel-on-escape is the expected
+    * modal-dismiss behaviour.
+    */
+   @Override
+   public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+      // GLFW.GLFW_KEY_ESCAPE = 256.
+      if (keyCode == 256) {
+         this.onClose();
+         return true;
+      }
+      return super.keyPressed(keyCode, scanCode, modifiers);
+   }
 }

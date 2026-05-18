@@ -124,20 +124,20 @@ public final class TradePostHooks {
             return ts;
          }
       }
-      // Fallback: scan loaded towns for one whose master-disk (NOT
-      // current coverage — the aux entry might already exist on this
-      // town, which would create a self-referential trap) contains pos.
+      // Fallback: route through TownCoverage like every other
+      // "which town contains this pos?" callsite in the codebase
+      // (Stage 1.2 migration). At break time the aux entry usually
+      // still exists, so the matching town's coverage trivially
+      // contains the broken pos via its own auxiliary disk —
+      // exactly what we want. Tie-break by master-block distance.
       TownSquareBlockEntity best = null;
       long bestDsq = Long.MAX_VALUE;
       for (TownSquareBlockEntity ts : TownSquareBlockEntity.loadedIn(level)) {
+         if (!ts.coverage().contains(pos)) continue;
          long dx = (long) pos.getX() - ts.getBlockPos().getX();
          long dz = (long) pos.getZ() - ts.getBlockPos().getZ();
          long dsq = dx * dx + dz * dz;
-         long r = ts.getTown().defaultRadius();
-         if (dsq <= r * r && dsq < bestDsq) {
-            bestDsq = dsq;
-            best = ts;
-         }
+         if (dsq < bestDsq) { bestDsq = dsq; best = ts; }
       }
       return best;
    }
