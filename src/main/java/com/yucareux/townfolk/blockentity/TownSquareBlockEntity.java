@@ -1,6 +1,7 @@
 package com.yucareux.townfolk.blockentity;
 
 import com.yucareux.townfolk.registry.ModRegistries;
+import com.yucareux.townfolk.town.TownCoverage;
 import com.yucareux.townfolk.town.TownData;
 import java.util.Collections;
 import java.util.Set;
@@ -39,6 +40,19 @@ public class TownSquareBlockEntity extends BlockEntity {
 
    public TownData getTown() {
       return this.town;
+   }
+
+   /**
+    * Build a fresh {@link TownCoverage} snapshot for this town. Currently
+    * a single disk around the master block at {@code defaultRadius}. Stage
+    * 1.3 extends this to merge in registered auxiliary blocks' disks.
+    *
+    * <p>Cheap to call — coverage is a tiny immutable record. Callers
+    * should not cache it across town-data changes (additions / removals
+    * of source blocks); just rebuild when needed.
+    */
+   public TownCoverage coverage() {
+      return TownCoverage.of(this.town, this.getBlockPos());
    }
 
    @Override

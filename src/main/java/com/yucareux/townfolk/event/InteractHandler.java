@@ -171,19 +171,16 @@ public final class InteractHandler {
       event.setCancellationResult(InteractionResult.CONSUME);
    }
 
-   /** True if {@code pos} sits within {@link com.yucareux.townfolk.town.TownData#defaultRadius()}
-    *  of any loaded town square in this level. The radius is interpreted
-    *  on the XZ plane only — Y is unconstrained so cellars and roof
-    *  storage still count. Used as the master scope gate for ALL
-    *  Townfolk UI: no town → vanilla behaviour, no exceptions. */
+   /** True if {@code pos} sits within the coverage of any loaded town
+    *  square in this level. Coverage is XZ-only — Y is unconstrained so
+    *  cellars and roof storage still count. Used as the master scope
+    *  gate for ALL Townfolk UI: no town → vanilla behaviour, no exceptions.
+    *
+    *  <p>Routes through {@link com.yucareux.townfolk.town.TownCoverage}
+    *  so multi-source coverage (Stage 1.3+) is honoured automatically. */
    private static boolean isInsideAnyTown(ServerLevel level, net.minecraft.core.BlockPos pos) {
       for (var town : com.yucareux.townfolk.blockentity.TownSquareBlockEntity.loadedIn(level)) {
-         net.minecraft.core.BlockPos sq = town.getBlockPos();
-         long dx = (long) pos.getX() - sq.getX();
-         long dz = (long) pos.getZ() - sq.getZ();
-         long distSq = dx * dx + dz * dz;
-         long r = town.getTown().defaultRadius();
-         if (distSq <= r * r) return true;
+         if (town.coverage().contains(pos)) return true;
       }
       return false;
    }

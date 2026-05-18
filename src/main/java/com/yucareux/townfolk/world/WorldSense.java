@@ -62,14 +62,22 @@ public final class WorldSense {
       sb.append("Location: ").append(dist).append(" blocks ").append(heading)
         .append(" of the town square\n");
 
-      // Town boundary awareness.
+      // Town boundary awareness — phrased from coverage, so once
+      // auxiliary blocks (Trade Post etc.) extend the town, the LLM
+      // gets a correct "inside / outside" summary without any special
+      // casing. We still report the master-block radius as the
+      // user-facing scalar; "inside or outside" comes from the full
+      // coverage check.
       if (level instanceof net.minecraft.server.level.ServerLevel sl) {
          for (var be : com.yucareux.townfolk.blockentity.TownSquareBlockEntity.loadedIn(sl)) {
             if (be.getBlockPos().equals(townSquare)) {
+               com.yucareux.townfolk.town.TownCoverage coverage = be.coverage();
                int rad = be.getTown().defaultRadius();
-               String inOut = dist > rad ? "OUTSIDE the town boundary"
-                            : dist > rad * 0.8 ? "near the edge of town"
-                            : "well inside the town";
+               boolean inside = coverage.contains(pos);
+               String inOut;
+               if (!inside) inOut = "OUTSIDE the town boundary";
+               else if (dist > rad * 0.8) inOut = "near the edge of town";
+               else inOut = "well inside the town";
                sb.append("Town boundary: ").append(rad).append(" blocks radius from the square. You are ")
                  .append(inOut).append(". You do not stray past the boundary unless escorted by the player.\n");
                break;

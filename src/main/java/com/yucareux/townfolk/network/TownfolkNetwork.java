@@ -166,11 +166,11 @@ public final class TownfolkNetwork {
       if (!(be instanceof com.yucareux.townfolk.blockentity.TownSquareBlockEntity town)) return false;
       if (sp.hasPermissions(2)) return true;
       if (level.getServer() != null && level.getServer().isSingleplayer()) return true;
-      // Proximity gate: within the town's working radius.
-      int r = town.getTown().defaultRadius();
-      double dx = sp.getX() - townPos.getX();
-      double dz = sp.getZ() - townPos.getZ();
-      return dx * dx + dz * dz <= (double) r * r;
+      // Proximity gate: within the town's full coverage area (master +
+      // any registered auxiliary blocks once Stage 1.3 lands). Use the
+      // block-aligned player position so the gate matches every other
+      // coverage check in the codebase.
+      return town.coverage().contains(sp.blockPosition());
    }
 
    private static void onSetStorageLabel(SetStorageLabelPayload payload, IPayloadContext ctx) {

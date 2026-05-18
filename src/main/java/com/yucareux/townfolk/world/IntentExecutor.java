@@ -128,11 +128,12 @@ public final class IntentExecutor {
       // beyond town radius from the square AND no player is currently
       // escorting (following us toward it), refuse and log. Player follows
       // legitimately drag villagers further afield; raw intents don't.
-      BlockPos sq = town.getBlockPos();
-      int rad = town.getTown().defaultRadius();
-      long gdx = goal.getX() - sq.getX();
-      long gdz = goal.getZ() - sq.getZ();
-      if (gdx * gdx + gdz * gdz > (long) rad * rad) {
+      // Boundary check via the town's current coverage — once Stage 1.3
+      // lands, this automatically respects auxiliary blocks (Trade Post,
+      // etc.) that extend the town's footprint.
+      com.yucareux.townfolk.town.TownCoverage coverage = town.coverage();
+      if (!coverage.contains(goal)) {
+         int rad = coverage.maxRadius();
          VerboseLog.write("INTENT_RESULT", "actor=" + self.name() + " status=outside_boundary",
             "target=\"" + target + "\" pos=" + goal.toShortString() + " radius=" + rad);
          town.getTown().log().add(level.getGameTime(), TownLog.Level.INFO,
