@@ -56,6 +56,13 @@ public final class TownData {
     *  double-rollover within the same day. */
    private long yesterdayStockDay;
 
+   /** "Magical" town treasury — accumulates trade payouts that aren't
+    *  attached to any physical container. Keyed by item id. Player
+    *  withdraws via the Trade tab. This solves the "all barrels full,
+    *  payment has nowhere to go" problem and decouples trade payment
+    *  from the town's physical storage layout entirely. */
+   private final java.util.Map<String, Integer> treasury;
+
    // Daily exchange caps — reset at day rollover.
    private final Map<String, Integer> exchangesByPair = new HashMap<>();
    private final Map<UUID, Integer> exchangesByVillager = new HashMap<>();
@@ -75,6 +82,7 @@ public final class TownData {
       this.discoveredItems = new java.util.HashSet<>();
       this.yesterdayStock = new java.util.HashMap<>();
       this.yesterdayStockDay = Long.MIN_VALUE;
+      this.treasury = new java.util.LinkedHashMap<>();
    }
 
    private static String pairKey(UUID a, UUID b) {
@@ -290,6 +298,41 @@ public final class TownData {
       return Integer.compare(currentCount, prev);
    }
 
+   // ───── Treasury ─────
+
+   /** Read-only snapshot of every (item-id, count) pair currently held
+    *  in the magical town treasury. UI iterates this to render a grid
+    *  of withdrawable items. */
+   public java.util.Map<String, Integer> treasury() {
+      return java.util.Collections.unmodifiableMap(this.treasury);
+   }
+
+   /** Deposit {@code count} of {@code itemId} into the treasury. Stacks
+    *  with any existing entry. Counts ≤ 0 are no-ops. */
+   public void depositToTreasury(String itemId, int count) {
+      if (itemId == null || itemId.isBlank() || count <= 0) return;
+      this.treasury.merge(itemId, count, Integer::sum);
+   }
+
+   /** Withdraw up to {@code requested} of {@code itemId} from the
+    *  treasury. Returns the actual amount taken (0 if the treasury
+    *  had none). Removes the key when the count drops to zero so the
+    *  UI's grid doesn't render empty cells. */
+   public int withdrawFromTreasury(String itemId, int requested) {
+      if (itemId == null || requested <= 0) return 0;
+      Integer have = this.treasury.get(itemId);
+      if (have == null || have <= 0) return 0;
+      int take = Math.min(have, requested);
+      int remaining = have - take;
+      if (remaining <= 0) this.treasury.remove(itemId);
+      else                this.treasury.put(itemId, remaining);
+      return take;
+   }
+
+   public int treasuryCount(String itemId) {
+      return this.treasury.getOrDefault(itemId, 0);
+   }
+
    public CompoundTag save() {
       CompoundTag tag = new CompoundTag();
       tag.putString("townName", this.townName);
@@ -340,6 +383,15 @@ public final class TownData {
       }
       tag.put("yesterdayStock", yest);
       tag.putLong("yesterdayStockDay", this.yesterdayStockDay);
+
+      ListTag treas = new ListTag();
+      for (var e : this.treasury.entrySet()) {
+         CompoundTag c = new CompoundTag();
+         c.putString("id", e.getKey());
+         c.putInt("count", e.getValue());
+         treas.add(c);
+      }
+      tag.put("treasury", treas);
 
       // Daily exchange caps — persist so a relog can't reset a
       // villager's exhausted-for-today counter and let them re-trade
@@ -416,6 +468,16 @@ public final class TownData {
       }
       this.yesterdayStockDay = tag.contains("yesterdayStockDay")
          ? tag.getLong("yesterdayStockDay") : Long.MIN_VALUE;
+
+      this.treasury.clear();
+      if (tag.contains("treasury")) {
+         ListTag list = tag.getList("treasury", Tag.TAG_COMPOUND);
+         for (int i = 0; i < list.size(); i++) {
+            CompoundTag c = list.getCompound(i);
+            int cnt = c.getInt("count");
+            if (cnt > 0) this.treasury.put(c.getString("id"), cnt);
+         }
+      }
 
 
       this.auxiliaries.clear();

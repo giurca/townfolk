@@ -123,12 +123,20 @@ public final class TownfolkNetwork {
       );
 
       // Trade tab → [Deliver] button. Server consumes the request from
-      // the player's inventory, pays out, applies prestige delta, marks
-      // the offer fulfilled.
+      // town storage, deposits payment into the town treasury, applies
+      // prestige delta, marks the offer fulfilled.
       registrar.playToServer(
          FulfillTradePayload.TYPE,
          FulfillTradePayload.STREAM_CODEC,
          TownfolkNetwork::onFulfillTrade
+      );
+
+      // Trade tab → treasury withdraw button. Server transfers from
+      // the abstract treasury pool into the player's inventory.
+      registrar.playToServer(
+         WithdrawTreasuryPayload.TYPE,
+         WithdrawTreasuryPayload.STREAM_CODEC,
+         TownfolkNetwork::onWithdrawTreasury
       );
 
       // Animal Plan modal: server opens the modal via OpenAnimalPlanPayload
@@ -182,6 +190,65 @@ public final class TownfolkNetwork {
             "player=" + sp.getName().getString()
                + " parcel=" + payload.parcelId()
                + " entries=" + entries.size(), "");
+      });
+   }
+
+   private static void onWithdrawTreasury(WithdrawTreasuryPayload payload, IPayloadContext ctx) {
+      ctx.enqueueWork(() -> {
+         if (!(ctx.player() instanceof net.minecraft.server.level.ServerPlayer sp)) return;
+         net.minecraft.server.level.ServerLevel level = sp.serverLevel();
+         net.minecraft.core.BlockPos townPos = net.minecraft.core.BlockPos.of(payload.townSquarePos());
+         if (!isAuthorisedTownAdmin(sp, level, townPos)) {
+            com.yucareux.townfolk.diag.VerboseLog.write("TREASURY_REJECT",
+               "player=" + sp.getName().getString()
+                  + " reason=unauthorised town=" + townPos.toShortString(), "");
+            return;
+         }
+         var be = level.getBlockEntity(townPos);
+         if (!(be instanceof com.yucareux.townfolk.blockentity.TownSquareBlockEntity town)) return;
+         com.yucareux.townfolk.town.TownData data = town.getTown();
+
+         int have = data.treasuryCount(payload.itemId());
+         if (have <= 0) return;
+         int want = payload.requested() <= 0 ? have : Math.min(payload.requested(), have);
+         int actuallyTook = data.withdrawFromTreasury(payload.itemId(), want);
+         if (actuallyTook <= 0) return;
+
+         var rl = net.minecraft.resources.ResourceLocation.tryParse(payload.itemId());
+         if (rl == null || !net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(rl)) {
+            // Treasury held a now-unknown item (mod uninstall, etc.).
+            // We've already removed it from the pool; nothing to give.
+            com.yucareux.townfolk.diag.VerboseLog.write("TREASURY_DROP_UNKNOWN",
+               "player=" + sp.getName().getString()
+                  + " item=" + payload.itemId() + " count=" + actuallyTook, "");
+            town.setChanged();
+            com.yucareux.townfolk.dialogue.TownAdminService.openAdminPanel(sp, level, town);
+            return;
+         }
+         var item = net.minecraft.core.registries.BuiltInRegistries.ITEM.get(rl);
+
+         // Hand the stack(s) to the player. Each ItemStack respects
+         // its max stack size; multi-stack drops are split correctly.
+         int remaining = actuallyTook;
+         int max = new net.minecraft.world.item.ItemStack(item).getMaxStackSize();
+         while (remaining > 0) {
+            int chunk = Math.min(remaining, max);
+            var stack = new net.minecraft.world.item.ItemStack(item, chunk);
+            if (!sp.getInventory().add(stack)) {
+               // Overflow → drop at feet.
+               sp.drop(stack, false);
+            }
+            remaining -= chunk;
+         }
+         town.setChanged();
+         com.yucareux.townfolk.diag.VerboseLog.write("TREASURY_WITHDRAW",
+            "player=" + sp.getName().getString()
+               + " town=" + data.townName()
+               + " item=" + payload.itemId()
+               + " count=" + actuallyTook, "");
+
+         // Refresh state so the Trade tab updates.
+         com.yucareux.townfolk.dialogue.TownAdminService.openAdminPanel(sp, level, town);
       });
    }
 

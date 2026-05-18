@@ -374,7 +374,14 @@ public final class TownAdminScreen extends Screen {
    private static final int TRADE_CELL_W = 96;
    private static final int TRADE_CELL_H = 80;
    private static final int TRADE_CELL_GAP = 8;
-   private static final int TRADE_GRID_TOP = 26;
+   /** Vertical band reserved for the header (y+10) and the treasury
+    *  row (y+22..y+44). Offer grid begins below. */
+   private static final int TRADE_GRID_TOP = 52;
+   /** Y offset where the treasury icon row sits. */
+   private static final int TRADE_TREASURY_Y = 22;
+   /** Side length of each treasury icon cell. */
+   private static final int TRADE_TREASURY_CELL = 22;
+   private static final int TRADE_TREASURY_GAP = 6;
 
    /** Row offset for grid scroll. Reset on tab switch. */
    private int tradeGridScrollRows = 0;
@@ -392,6 +399,10 @@ public final class TownAdminScreen extends Screen {
             + "  ·  Prestige: " + this.state.prestige() + " / "
             + com.yucareux.townfolk.town.TownData.MAX_PRESTIGE,
          innerR, top + 10);
+
+      // Treasury row — render before the offer grid so the player can
+      // see (and claim) their accumulated payouts at a glance.
+      renderTreasuryRow(graphics, innerL, innerR, top + TRADE_TREASURY_Y);
 
       var offers = this.state.tradeOffers();
       if (offers.isEmpty()) {
@@ -535,7 +546,14 @@ public final class TownAdminScreen extends Screen {
                  : offer.daysRemaining() + " days left to deliver";
       g.drawString(this.font, exp, x, y,
          offer.daysRemaining() <= 2 ? FG_ERROR : FG_DIM, true);
-      y += 18;
+      y += 12;
+
+      // Source / destination hint — make the new flow legible: items
+      // come from the town's barrels, emeralds land in the treasury
+      // (top of this tab) until the player withdraws them.
+      g.drawString(this.font, "Drawn from town storage. Pays into treasury.",
+         x, y, FG_FAINT, true);
+      y += 14;
 
       // Flavor blurb, wrapped.
       String blurb = offer.flavorBlurb();
@@ -613,6 +631,59 @@ public final class TownAdminScreen extends Screen {
    private TownStateUpdatePayload.TradeOfferView findTradeOffer(String id) {
       if (id == null) return null;
       for (var o : this.state.tradeOffers()) if (id.equals(o.id())) return o;
+      return null;
+   }
+
+   /** Render the treasury icon row at the top of the Trade tab. Each
+    *  withdrawable item gets a small clickable card; clicking it
+    *  withdraws (with shift = whole stack, see hitTestTreasuryCell). */
+   private void renderTreasuryRow(GuiGraphics g, int innerL, int innerR, int y) {
+      var treasury = this.state.treasury();
+      g.drawString(this.font, "Town treasury",
+         innerL, y + 4, FG_DIM, true);
+      if (treasury.isEmpty()) {
+         UiText.faint(g, this.font,
+            "(empty — fulfil offers below to collect payouts)",
+            innerL + 80, y + 4);
+         return;
+      }
+      int x = innerL + 80;
+      for (var ic : treasury) {
+         if (x + TRADE_TREASURY_CELL > innerR) break;     // run out of horizontal room
+         renderTreasuryCell(g, ic, x, y);
+         x += TRADE_TREASURY_CELL + TRADE_TREASURY_GAP;
+      }
+   }
+
+   private void renderTreasuryCell(GuiGraphics g,
+                                   TownStateUpdatePayload.ItemCount ic, int x, int y) {
+      g.fill(x, y, x + TRADE_TREASURY_CELL, y + TRADE_TREASURY_CELL, ROW_BG);
+      g.fill(x, y + TRADE_TREASURY_CELL,
+             x + TRADE_TREASURY_CELL, y + TRADE_TREASURY_CELL + 1, PANEL_BORDER);
+      var stack = stackForItemId(ic.itemId());
+      g.renderItem(stack, x + 3, y + 3);
+      // Count overlay, bottom-right, shadowed for legibility.
+      String n = String.valueOf(ic.count());
+      int nw = this.font.width(n);
+      g.drawString(this.font, n,
+         x + TRADE_TREASURY_CELL - nw - 1, y + TRADE_TREASURY_CELL - 8,
+         FG_ACCENT, true);
+   }
+
+   /** Hit-test for the treasury row. Returns the clicked item id or null. */
+   private String hitTestTreasuryCell(double mouseX, double mouseY,
+                                       int paneL, int paneR, int top) {
+      int innerL = paneL + UiTheme.PADDING;
+      int innerR = paneR - UiTheme.PADDING;
+      int y = top + TRADE_TREASURY_Y;
+      if (mouseY < y || mouseY >= y + TRADE_TREASURY_CELL) return null;
+      var treasury = this.state.treasury();
+      int x = innerL + 80;
+      for (var ic : treasury) {
+         if (x + TRADE_TREASURY_CELL > innerR) break;
+         if (mouseX >= x && mouseX < x + TRADE_TREASURY_CELL) return ic.itemId();
+         x += TRADE_TREASURY_CELL + TRADE_TREASURY_GAP;
+      }
       return null;
    }
 
@@ -1089,6 +1160,18 @@ public final class TownAdminScreen extends Screen {
                }
                // Click outside popup also closes.
                this.selectedTradeOfferId = null;
+               return true;
+            }
+            // Treasury cell click → withdraw that item. Shift-click
+            // takes a single (max 1 stack); plain click takes all of
+            // the slot's count.
+            String treasuryHit = hitTestTreasuryCell(mouseX, mouseY, paneL, paneR, contentTop);
+            if (treasuryHit != null) {
+               boolean shift = net.minecraft.client.gui.screens.Screen.hasShiftDown();
+               int requested = shift ? 1 : 0;     // 0 = "take everything"
+               PacketDistributor.sendToServer(
+                  new com.yucareux.townfolk.network.WithdrawTreasuryPayload(
+                     townPos(), treasuryHit, requested));
                return true;
             }
             // Grid mode: click a cell → open popup.

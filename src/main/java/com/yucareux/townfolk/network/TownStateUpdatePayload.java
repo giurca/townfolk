@@ -54,6 +54,10 @@ public record TownStateUpdatePayload(
    List<ProductionTarget> productionTargets,
    List<ParcelSummary> parcels,
    List<TradeOfferView> tradeOffers,
+   /** Withdrawable items in the town's "magical" treasury pool —
+    *  accumulated trade payouts that aren't tied to any physical
+    *  container. Each ItemCount uses trend=0. */
+   List<ItemCount> treasury,
    int populationAlive,
    int populationTotal,
    /** Number of registered TRADE_POST auxiliary blocks. Gates the Trade tab. */
@@ -388,6 +392,8 @@ public record TownStateUpdatePayload(
             for (ParcelSummary ps : p.parcels) PARCEL_CODEC.encode(buf, ps);
             buf.writeVarInt(p.tradeOffers.size());
             for (TradeOfferView tov : p.tradeOffers) TRADE_OFFER_CODEC.encode(buf, tov);
+            buf.writeVarInt(p.treasury.size());
+            for (ItemCount ic : p.treasury) ITEM_CODEC.encode(buf, ic);
             buf.writeVarInt(p.populationAlive);
             buf.writeVarInt(p.populationTotal);
             buf.writeVarInt(p.tradePostCount);
@@ -432,6 +438,9 @@ public record TownStateUpdatePayload(
             int ton = buf.readVarInt();
             java.util.ArrayList<TradeOfferView> tradeOffers = new java.util.ArrayList<>(ton);
             for (int i = 0; i < ton; i++) tradeOffers.add(TRADE_OFFER_CODEC.decode(buf));
+            int treasN = buf.readVarInt();
+            java.util.ArrayList<ItemCount> treasury = new java.util.ArrayList<>(treasN);
+            for (int i = 0; i < treasN; i++) treasury.add(ITEM_CODEC.decode(buf));
             int popA = buf.readVarInt();
             int popT = buf.readVarInt();
             int tradePosts = buf.readVarInt();
@@ -443,7 +452,7 @@ public record TownStateUpdatePayload(
             int dToday = buf.readVarInt();
             return new TownStateUpdatePayload(pos, name, orStatus, orUsage, orLimit, total,
                villagers, townFacts, log, storage,
-               agg, resLocs, targets, parcels, tradeOffers,
+               agg, resLocs, targets, parcels, tradeOffers, treasury,
                popA, popT, tradePosts, prestige,
                idle, work, slp, bToday, dToday);
          }

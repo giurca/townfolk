@@ -143,8 +143,15 @@ public final class ModRegistries {
       if (event.getTabKey() == net.minecraft.world.item.CreativeModeTabs.TOOLS_AND_UTILITIES) {
          event.accept(SURVEYOR_STAKE.get());
       }
-      // Town Square is a BlockItem and gets auto-inserted into the Functional
-      // Blocks tab by NeoForge — don't duplicate it here (crashes the event).
+      // Trade Post → Functional Blocks tab. Town Square is auto-
+      // inserted into this same tab by NeoForge (BlockItem default
+      // behaviour); accepting it again throws
+      // "already exists in the tab's list" and crashes the event,
+      // so we only explicitly add the items that DON'T get the
+      // auto treatment.
+      if (event.getTabKey() == net.minecraft.world.item.CreativeModeTabs.FUNCTIONAL_BLOCKS) {
+         event.accept(TRADE_POST_ITEM.get());
+      }
    }
 
    private ModRegistries() {

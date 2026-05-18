@@ -698,6 +698,13 @@ public final class TownAdminService {
          ));
       }
 
+      // Treasury snapshot — preserves insertion order (LinkedHashMap)
+      // so newest payouts appear first when the player opens the tab.
+      java.util.ArrayList<TownStateUpdatePayload.ItemCount> treasuryOut = new java.util.ArrayList<>();
+      for (var e : data.treasury().entrySet()) {
+         treasuryOut.add(new TownStateUpdatePayload.ItemCount(e.getKey(), e.getValue()));
+      }
+
       PacketDistributor.sendToPlayer(player, new TownStateUpdatePayload(
          town.getBlockPos().asLong(),
          data.townName(),
@@ -714,6 +721,7 @@ public final class TownAdminService {
          targetsOut,
          parcelSummaries,
          tradeOffersOut,
+         treasuryOut,
          populationAliveTally,
          data.villagers().size(),
          tradePostCount,
