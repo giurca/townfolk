@@ -91,17 +91,31 @@ public final class CropPlanMenu extends AbstractContainerMenu {
          }
       }
 
-      // Ghost slots — one per plan row, vertical column.
-      int slotX = 12;
-      int slotY0 = 28;
-      int rowH = 22;
+      // Ghost slots — one per plan entry, laid out as a 2×3 grid of
+      // "seed cards." Keeping these constants in sync with the matching
+      // values on {@link com.yucareux.townfolk.client.screen.CropPlanScreen}
+      // is critical; drift would render icons outside their card borders.
+      // The grid is 2 columns × 3 rows; each card is 116 wide × 54 tall.
+      // Slot sits at (cardX + 4, cardY + 4); the rest of each card is
+      // adornment rendered client-side.
+      final int gridCols = 2;
+      final int cardW = 116, cardH = 54;
+      final int cardGap = 8;
+      final int gridOriginX = 14;
+      final int gridOriginY = 28;
       for (int i = 0; i < CropPlan.MAX_ENTRIES; i++) {
-         this.addSlot(new GhostSlot(this.ghostContainer, i, slotX, slotY0 + i * rowH));
+         int col = i % gridCols;
+         int row = i / gridCols;
+         int cardX = gridOriginX + col * (cardW + cardGap);
+         int cardY = gridOriginY + row * (cardH + cardGap);
+         this.addSlot(new GhostSlot(this.ghostContainer, i, cardX + 4, cardY + 4));
       }
 
-      // Player inventory: 27 slots (3×9) + 9 hotbar. Below the rows.
-      int invOriginX = 12;
-      int invOriginY = slotY0 + CropPlan.MAX_ENTRIES * rowH + 12;
+      // Player inventory: 27 slots (3×9) + 9 hotbar. Centred below the
+      // 3-row card grid. invOriginY = (cards bottom) + 12px padding.
+      final int gridRows = (CropPlan.MAX_ENTRIES + gridCols - 1) / gridCols;
+      int invOriginX = 30;
+      int invOriginY = gridOriginY + gridRows * cardH + (gridRows - 1) * cardGap + 12;
       for (int row = 0; row < 3; row++) {
          for (int col = 0; col < 9; col++) {
             this.addSlot(new Slot(inv, col + row * 9 + 9,
