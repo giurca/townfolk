@@ -1624,11 +1624,33 @@ public final class TownAdminScreen extends Screen {
       var stack = stackForItemId(ic.itemId());
       g.renderItem(stack, iconX, iconY);
 
-      // Count line — y+32.
+      // Count line — y+32. Composes:
+      //   ↑/↓ trend arrow (server-side day-over-day diff)
+      //   count
+      //   "+N" suffix when villagers are currently carrying any of
+      //   this item ("in flight"), so the player can tell at a glance
+      //   that the stockpile is about to grow.
+      int inFlight = inFlightFor(ic.itemId());
+      String arrow = ic.trend() > 0 ? "↑ " : ic.trend() < 0 ? "↓ " : "";
+      int arrowColor = ic.trend() > 0 ? UiTheme.OK
+                     : ic.trend() < 0 ? UiTheme.BAD
+                     : FG_FAINT;
       String countText = String.valueOf(ic.count());
-      int tw = this.font.width(countText);
-      g.drawString(this.font, countText, x + (RES_CELL_W - tw) / 2, y + 32,
-         FG_ACCENT, true);
+      String suffix = inFlight > 0 ? "  +" + inFlight : "";
+      int arrowW = this.font.width(arrow);
+      int countW = this.font.width(countText);
+      int suffixW = this.font.width(suffix);
+      int totalW = arrowW + countW + suffixW;
+      int drawX = x + (RES_CELL_W - totalW) / 2;
+      if (!arrow.isEmpty()) {
+         g.drawString(this.font, arrow, drawX, y + 32, arrowColor, true);
+         drawX += arrowW;
+      }
+      g.drawString(this.font, countText, drawX, y + 32, FG_ACCENT, true);
+      drawX += countW;
+      if (!suffix.isEmpty()) {
+         g.drawString(this.font, suffix, drawX, y + 32, FG_FAINT, true);
+      }
 
       // Name line — y+44, truncated to cell width.
       String name = shortItemName(ic.itemId());
@@ -1638,6 +1660,24 @@ public final class TownAdminScreen extends Screen {
       }
       int nw = this.font.width(shown);
       g.drawString(this.font, shown, x + (RES_CELL_W - nw) / 2, y + 44, FG_DIM, true);
+   }
+
+   /** Sum the count of {@code itemId} across every villager's
+    *  inventory in the current state snapshot. Used by the Resources
+    *  grid to surface "+N in flight" when the stockpile is about to
+    *  grow.
+    *
+    *  <p>Recomputed per cell per frame; cheap because villager count
+    *  and inventory size are both small. If profiling ever shows it
+    *  matters, cache once per state-update tick. */
+   private int inFlightFor(String itemId) {
+      int sum = 0;
+      for (var v : this.state.villagers()) {
+         for (var ic : v.inventory()) {
+            if (ic.itemId().equals(itemId)) sum += ic.count();
+         }
+      }
+      return sum;
    }
 
    /** Look up the production target for an item id (if any). Returns

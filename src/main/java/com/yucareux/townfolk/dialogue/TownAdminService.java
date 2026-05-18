@@ -643,11 +643,15 @@ public final class TownAdminService {
       }
 
       // Sort the aggregate descending so the UI just iterates it.
+      // Attach a trend signal computed against yesterday's snapshot
+      // (TradeService rolls it at the start of each game day).
       List<TownStateUpdatePayload.ItemCount> aggregateOut = new ArrayList<>(aggregateTotals.size());
       aggregateTotals.entrySet().stream()
          .sorted((a, b) -> Integer.compare(b.getValue(), a.getValue()))
-         .forEach(en -> aggregateOut.add(
-            new TownStateUpdatePayload.ItemCount(en.getKey(), en.getValue())));
+         .forEach(en -> {
+            int trend = data.stockTrend(en.getKey(), en.getValue());
+            aggregateOut.add(new TownStateUpdatePayload.ItemCount(en.getKey(), en.getValue(), trend));
+         });
       // Resource-locations sorted by item then descending count — UI
       // can sub-slice by item and the order within each item already
       // shows the biggest stash first.

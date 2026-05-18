@@ -65,8 +65,40 @@ public final class TradeService {
       for (TownSquareBlockEntity ts : TownSquareBlockEntity.loadedIn(level)) {
          TownData data = ts.getTown();
          if (doDiscovery) discover(level, ts, data);
-         if (doDaily)     rollDaily(level, ts, data, currentDay);
+         if (doDaily) {
+            snapshotStockTrend(level, ts, data, currentDay);  // every town
+            // Trade rolling only runs for towns with a Trade Post.
+            if (data.hasAuxiliaryOfType(com.yucareux.townfolk.town.TownAuxiliaryType.TRADE_POST)) {
+               rollDaily(level, ts, data, currentDay);
+            }
+         }
       }
+   }
+
+   /** Once per game day, snapshot the town's current aggregate stock
+    *  totals into TownData#yesterdayStock so the Resources tab can
+    *  render a ↑/↓ trend arrow per cell. */
+   private static void snapshotStockTrend(net.minecraft.server.level.ServerLevel level,
+                                          TownSquareBlockEntity ts,
+                                          TownData data,
+                                          long currentDay) {
+      if (data.yesterdayStockDay() == currentDay) return;
+      java.util.Map<String, Integer> current = new java.util.HashMap<>();
+      for (var entry : com.yucareux.townfolk.town.StorageRegistry.entries(level)) {
+         net.minecraft.core.BlockPos pos = net.minecraft.core.BlockPos.of(entry.getKey());
+         if (!ts.coverage().contains(pos)) continue;
+         var be = level.getBlockEntity(pos);
+         if (!(be instanceof net.minecraft.world.Container c)) continue;
+         for (int i = 0; i < c.getContainerSize(); i++) {
+            var s = c.getItem(i);
+            if (s.isEmpty()) continue;
+            var id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(s.getItem());
+            if (id == null) continue;
+            current.merge(id.toString(), s.getCount(), Integer::sum);
+         }
+      }
+      data.rollYesterdayStock(current, currentDay);
+      ts.setChanged();
    }
 
    // ───── Discovery ─────

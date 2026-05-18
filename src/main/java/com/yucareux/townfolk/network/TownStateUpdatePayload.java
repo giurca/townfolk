@@ -74,7 +74,18 @@ public record TownStateUpdatePayload(
    public record LogEntry(long gameTime, String level, String message) {}
    public record PinSummary(String id, String text, String status, long createdDay) {}
    public record TodoSummary(String id, String text, String counterparty, String status, long createdDay) {}
-   public record ItemCount(String itemId, int count) {}
+   /** Item-id + count tuple used in three places:
+    *    - aggregateResources (town stockpile, ships trend = -1/0/+1)
+    *    - per-villager inventories (trend always 0)
+    *    - per-container contents (trend always 0)
+    *  Only the aggregate-resources callsite sets trend; everything
+    *  else passes 0 because the trend signal is only meaningful at
+    *  town-aggregate granularity. */
+   public record ItemCount(String itemId, int count, int trend) {
+      /** Trend-less convenience for callsites that don't have / need
+       *  day-over-day data. */
+      public ItemCount(String itemId, int count) { this(itemId, count, 0); }
+   }
    public record StorageEntry(long packedPos, String blockKind, String lastUpdaterName,
                               long lastUpdatedTick, List<ItemCount> contents,
                               String label) {}
@@ -191,8 +202,14 @@ public record TownStateUpdatePayload(
 
    private static final StreamCodec<RegistryFriendlyByteBuf, ItemCount> ITEM_CODEC =
       StreamCodec.of(
-         (buf, i) -> { buf.writeUtf(i.itemId()); buf.writeVarInt(i.count()); },
-         buf -> new ItemCount(buf.readUtf(), buf.readVarInt())
+         (buf, i) -> {
+            buf.writeUtf(i.itemId());
+            buf.writeVarInt(i.count());
+            // trend is a tiny signed byte (-1 / 0 / +1) but writeByte
+            // gives us a clean wire encoding either way.
+            buf.writeByte((byte) Integer.signum(i.trend()));
+         },
+         buf -> new ItemCount(buf.readUtf(), buf.readVarInt(), buf.readByte())
       );
 
    private static final StreamCodec<RegistryFriendlyByteBuf, ResourceLoc> RESLOC_CODEC =

@@ -48,6 +48,14 @@ public final class TownData {
     *  the TradeDiscoveryService each tick. */
    private final java.util.Set<String> discoveredItems;
 
+   /** Yesterday's aggregate stock snapshot, keyed by item id. Used
+    *  by the Resources tab to render an ↑/↓ trend arrow on each cell.
+    *  Refreshed once per game day by TradeService. */
+   private final java.util.Map<String, Integer> yesterdayStock;
+   /** Last game day yesterdayStock was rolled. Guards against
+    *  double-rollover within the same day. */
+   private long yesterdayStockDay;
+
    // Daily exchange caps — reset at day rollover.
    private final Map<String, Integer> exchangesByPair = new HashMap<>();
    private final Map<UUID, Integer> exchangesByVillager = new HashMap<>();
@@ -65,6 +73,8 @@ public final class TownData {
       this.prestige = 0;
       this.tradeOffers = new ArrayList<>();
       this.discoveredItems = new java.util.HashSet<>();
+      this.yesterdayStock = new java.util.HashMap<>();
+      this.yesterdayStockDay = Long.MIN_VALUE;
    }
 
    private static String pairKey(UUID a, UUID b) {
@@ -254,6 +264,32 @@ public final class TownData {
       return java.util.Collections.unmodifiableSet(this.discoveredItems);
    }
 
+   // ───── Trend snapshot ─────
+
+   /** Read-only view of the previous-day stock snapshot. Use
+    *  {@link #stockTrend} for the +1/0/-1 trend signal. */
+   public java.util.Map<String, Integer> yesterdayStock() {
+      return java.util.Collections.unmodifiableMap(this.yesterdayStock);
+   }
+
+   public long yesterdayStockDay() { return this.yesterdayStockDay; }
+
+   /** Replace yesterday's snapshot with {@code current} and stamp the
+    *  rollover day. Called once per game day from TradeService. */
+   public void rollYesterdayStock(java.util.Map<String, Integer> current, long day) {
+      this.yesterdayStock.clear();
+      this.yesterdayStock.putAll(current);
+      this.yesterdayStockDay = day;
+   }
+
+   /** Signed delta sign between {@code currentCount} and yesterday's
+    *  count for {@code itemId}. -1 / 0 / +1. Used by the Resources
+    *  grid's trend arrow. */
+   public int stockTrend(String itemId, int currentCount) {
+      int prev = this.yesterdayStock.getOrDefault(itemId, 0);
+      return Integer.compare(currentCount, prev);
+   }
+
    public CompoundTag save() {
       CompoundTag tag = new CompoundTag();
       tag.putString("townName", this.townName);
@@ -294,6 +330,16 @@ public final class TownData {
          disco.add(c);
       }
       tag.put("discoveredItems", disco);
+
+      ListTag yest = new ListTag();
+      for (var e : this.yesterdayStock.entrySet()) {
+         CompoundTag c = new CompoundTag();
+         c.putString("id", e.getKey());
+         c.putInt("count", e.getValue());
+         yest.add(c);
+      }
+      tag.put("yesterdayStock", yest);
+      tag.putLong("yesterdayStockDay", this.yesterdayStockDay);
       return tag;
    }
 
@@ -327,6 +373,18 @@ public final class TownData {
             this.discoveredItems.add(list.getCompound(i).getString("id"));
          }
       }
+
+      this.yesterdayStock.clear();
+      if (tag.contains("yesterdayStock")) {
+         ListTag list = tag.getList("yesterdayStock", Tag.TAG_COMPOUND);
+         for (int i = 0; i < list.size(); i++) {
+            CompoundTag c = list.getCompound(i);
+            this.yesterdayStock.put(c.getString("id"), c.getInt("count"));
+         }
+      }
+      this.yesterdayStockDay = tag.contains("yesterdayStockDay")
+         ? tag.getLong("yesterdayStockDay") : Long.MIN_VALUE;
+
 
       this.auxiliaries.clear();
       if (tag.contains("auxiliaries")) {
