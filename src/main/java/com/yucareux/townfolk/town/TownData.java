@@ -30,6 +30,13 @@ public final class TownData {
    private final List<TownAuxiliaryEntry> auxiliaries;
    private final TownLog log = new TownLog();
 
+   /** Reputation/standing scalar. Trade Post v1 (Stage 3) consumes
+    *  this to gate trade tiers. Bounded [0, {@link #MAX_PRESTIGE}].
+    *  Reads/writes are clamped via {@link #addPrestige(int)} — never
+    *  set this field directly. */
+   private int prestige;
+   public static final int MAX_PRESTIGE = 1000;
+
    // Daily exchange caps — reset at day rollover.
    private final Map<String, Integer> exchangesByPair = new HashMap<>();
    private final Map<UUID, Integer> exchangesByVillager = new HashMap<>();
@@ -44,6 +51,7 @@ public final class TownData {
       this.villagers = new ArrayList<>();
       this.townFacts = new ArrayList<>();
       this.auxiliaries = new ArrayList<>();
+      this.prestige = 0;
    }
 
    private static String pairKey(UUID a, UUID b) {
@@ -168,6 +176,22 @@ public final class TownData {
       return false;
    }
 
+   // ───── Prestige ─────
+
+   public int prestige() { return this.prestige; }
+
+   /** Adjust prestige by {@code delta} (positive or negative). Result
+    *  is clamped to [0, {@link #MAX_PRESTIGE}]. Returns the new value
+    *  after clamping. No-op if delta is zero. */
+   public int addPrestige(int delta) {
+      if (delta == 0) return this.prestige;
+      long next = (long) this.prestige + delta;
+      if (next < 0)            this.prestige = 0;
+      else if (next > MAX_PRESTIGE) this.prestige = MAX_PRESTIGE;
+      else                     this.prestige = (int) next;
+      return this.prestige;
+   }
+
    public CompoundTag save() {
       CompoundTag tag = new CompoundTag();
       tag.putString("townName", this.townName);
@@ -195,6 +219,7 @@ public final class TownData {
          alist.add(ec);
       }
       tag.put("auxiliaries", alist);
+      tag.putInt("prestige", this.prestige);
       return tag;
    }
 
@@ -206,6 +231,11 @@ public final class TownData {
          ListTag list = tag.getList("villagers", Tag.TAG_COMPOUND);
          for (int i = 0; i < list.size(); i++) this.villagers.add(VillagerEntry.load(list.getCompound(i)));
       }
+      // Clamp on load so a manually-edited save with junk values
+      // (or a save from a future build with a higher cap) folds
+      // back into the legal range.
+      int rawPrestige = tag.contains("prestige") ? tag.getInt("prestige") : 0;
+      this.prestige = Math.max(0, Math.min(MAX_PRESTIGE, rawPrestige));
       this.auxiliaries.clear();
       if (tag.contains("auxiliaries")) {
          ListTag list = tag.getList("auxiliaries", Tag.TAG_COMPOUND);
