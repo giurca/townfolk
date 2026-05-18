@@ -375,22 +375,17 @@ public final class ParcelRoutine {
       return false;
    }
 
-   /** Default population soft-cap used when no {@link com.yucareux.townfolk.town.AnimalPlan}
-    *  entry exists for a species. Picked to be permissive (most
-    *  parcels don't naturally support 16 of any species) while still
-    *  preventing runaway breeding. Override per-species via the
-    *  animal plan modal. */
-   private static final int DEFAULT_BREED_SOFT_CAP = 16;
-
-   /** True iff this breed task is permitted right now. Decision tree:
+   /** True iff this breed task is permitted right now. Breeding is
+    *  strict opt-in: the player must have explicitly set
+    *  {@link com.yucareux.townfolk.town.AnimalPlan.Mode#BREED_UP} with
+    *  a positive target via the animal-plan modal. No plan → no
+    *  breeding (separate from harvest behaviour, which is unaffected).
+    *
+    *  <p>Decision tree:
     *  <ul>
-    *    <li>No {@link com.yucareux.townfolk.town.AnimalPlan} entry
-    *        for this species → breed up to {@link #DEFAULT_BREED_SOFT_CAP}.
-    *        Lets a freshly-built ANIMAL parcel breed sensibly without
-    *        the player having to open the modal first.
-    *    <li>Entry exists, mode = HOLD → never breed (explicit opt-out).
-    *    <li>Entry exists, mode = BREED_UP, target = 0 → never breed
-    *        (player set the count to zero on purpose).
+    *    <li>No plan entry for this species → never breed.
+    *    <li>Entry exists, mode = HOLD → never breed.
+    *    <li>Entry exists, mode = BREED_UP, target = 0 → never breed.
     *    <li>Entry exists, mode = BREED_UP, target &gt; 0 → breed
     *        while current population &lt; target.
     *  </ul>
@@ -399,6 +394,12 @@ public final class ParcelRoutine {
     *  so a parcel with 6 adult cows + 2 calves reads "8 cows"
     *  against the target — keeps breeding from overshooting while
     *  juveniles are still maturing.
+    *
+    *  <p>Important: this gate is INDEPENDENT of any harvest production
+    *  cap. Capping milk does not stop a herder from breeding their
+    *  cows (and vice versa) — the two systems track different goals.
+    *  Once population reaches target, breeding stops via this gate;
+    *  harvest priority then naturally takes over.
     */
    private static boolean breedAllowedFor(net.minecraft.server.level.ServerLevel level,
                                           FieldRegion parcel,
@@ -409,17 +410,11 @@ public final class ParcelRoutine {
       String speciesId = speciesIdFor(cls);
       if (speciesId == null) return false;
 
-      // Resolve the effective cap.
-      int cap;
       var entry = plan.findSpecies(speciesId);
-      if (entry.isEmpty()) {
-         cap = DEFAULT_BREED_SOFT_CAP;
-      } else {
-         if (entry.get().mode() == com.yucareux.townfolk.town.AnimalPlan.Mode.HOLD) return false;
-         int target = entry.get().targetCount();
-         if (target <= 0) return false;
-         cap = target;
-      }
+      if (entry.isEmpty()) return false;
+      if (entry.get().mode() == com.yucareux.townfolk.town.AnimalPlan.Mode.HOLD) return false;
+      int target = entry.get().targetCount();
+      if (target <= 0) return false;
 
       // Count current population (adults + babies).
       var mn = parcel.scanMin(); var mx = parcel.scanMax();
@@ -428,7 +423,7 @@ public final class ParcelRoutine {
          mx.getX() + 1, mx.getY() + 1, mx.getZ() + 1);
       int now = level.getEntitiesOfClass(cls, aabb,
          a -> a.isAlive()).size();
-      return now < cap;
+      return now < target;
    }
 
    /** Map a livestock class to its vanilla entity-type id. Returns
