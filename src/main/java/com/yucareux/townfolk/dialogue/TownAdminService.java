@@ -601,12 +601,9 @@ public final class TownAdminService {
          if (m.contains("died") || m.contains(" has died") || m.contains("was killed")) deathsToday++;
       }
 
-      boolean peaceful = com.yucareux.townfolk.config.TownfolkConfig.COMMON.peaceful.get();
       PacketDistributor.sendToPlayer(player, new TownStateUpdatePayload(
          town.getBlockPos().asLong(),
          data.townName(),
-         data.defaultRadius(),
-         peaceful,
          openrouterStatus,
          usage,
          limit,

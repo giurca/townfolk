@@ -3,7 +3,6 @@ package com.yucareux.townfolk.client.screen;
 import com.yucareux.townfolk.client.ui.UiBar;
 import com.yucareux.townfolk.client.ui.UiCard;
 import com.yucareux.townfolk.client.ui.UiList;
-import com.yucareux.townfolk.client.ui.UiPill;
 import com.yucareux.townfolk.client.ui.UiTabs;
 import com.yucareux.townfolk.client.ui.UiText;
 import com.yucareux.townfolk.client.ui.UiTheme;
@@ -256,11 +255,9 @@ public final class TownAdminScreen extends Screen {
     *  widgets and labels can't drift. All measured down from the tab's content
     *  top. Tweak in one place if the layout changes. */
    private static final int OV_PULSE_Y      = 4;
-   /** Two rows of pulse cards now (counters + top resources), separated by
-    *  GAP_MEDIUM. Keep this in sync with {@link #renderOverviewPulse}. */
-   private static final int OV_PULSE_H      = (UiTheme.CARD_HEIGHT * 2) + UiTheme.GAP_MEDIUM;
-   private static final int OV_PILLS_Y      = OV_PULSE_Y + OV_PULSE_H + 10;
-   private static final int OV_NAME_LABEL_Y = OV_PILLS_Y + 18;
+   /** One row of pulse cards (counters only). */
+   private static final int OV_PULSE_H      = UiTheme.CARD_HEIGHT;
+   private static final int OV_NAME_LABEL_Y = OV_PULSE_Y + OV_PULSE_H + 18;
    private static final int OV_NAME_BOX_Y   = OV_NAME_LABEL_Y + 12;
    private static final int OV_STATUS_Y     = OV_NAME_BOX_Y + 30;
    private static final int OV_REFRESH_Y    = OV_STATUS_Y;
@@ -1019,11 +1016,9 @@ public final class TownAdminScreen extends Screen {
     *  activity breakdown + day-over-day deltas.
     *
     *  All counters come from server-side tallies in
-    *  {@link TownStateUpdatePayload} (the {@code populationAlive},
-    *  {@code idleCount}, etc. fields) so the UI doesn't have to walk the
-    *  villager list each frame. The second row of cards holds top
-    *  stockpile resources so the player gets "30 wheat, 12 wool, 4 milk"
-    *  without leaving Overview. */
+    *  {@link TownStateUpdatePayload} so the UI doesn't have to walk the
+    *  villager list each frame. The Resources tab handles per-item
+    *  stockpile readout; we don't duplicate that here. */
    private void renderOverviewPulse(GuiGraphics graphics, int paneL, int paneR, int top) {
       int innerL = paneL + UiTheme.PADDING;
       int innerR = paneR - UiTheme.PADDING;
@@ -1062,25 +1057,6 @@ public final class TownAdminScreen extends Screen {
       x += cardW + gap;
       UiCard.draw(graphics, this.font, x, top, cardW, cardH,
          "Deaths today", String.valueOf(deaths), deaths == 0 ? "—" : "-" + deaths);
-
-      // Second row: top resources from the aggregate (jump to Resources
-      // tab for full list).
-      int row2Y = top + cardH + gap;
-      int row2CardW = (total - 3 * gap) / 4;
-      var agg = this.state.aggregateResources();
-      for (int i = 0; i < 4; i++) {
-         int rx = innerL + i * (row2CardW + gap);
-         if (i < agg.size()) {
-            var ic = agg.get(i);
-            UiCard.draw(graphics, this.font, rx, row2Y, row2CardW, cardH,
-               shortItemName(ic.itemId()),
-               String.valueOf(ic.count()),
-               "in town stockpile");
-         } else {
-            UiCard.draw(graphics, this.font, rx, row2Y, row2CardW, cardH,
-               "(no item)", "—", "open Resources tab");
-         }
-      }
    }
 
    private static String pct(int part, int whole) {
@@ -1096,18 +1072,6 @@ public final class TownAdminScreen extends Screen {
    private void renderOverviewBody(GuiGraphics graphics, int paneL, int paneR, int top, int bottom) {
       int innerL = paneL + UiTheme.PADDING;
       int innerR = paneR - UiTheme.PADDING;
-
-      // Status pills, right-aligned, sitting cleanly under the pulse strip.
-      String radiusText = "Radius " + this.state.radius() + " blocks";
-      String peaceText  = this.state.peaceful() ? "Peaceful · combat off" : "Combat enabled";
-      int radiusW = this.font.width(radiusText) + 8;
-      int peaceW  = this.font.width(peaceText)  + 8;
-      int pillY = top + OV_PILLS_Y;
-      int radiusX = innerR - radiusW;
-      int peaceX  = radiusX - UiTheme.GAP_SMALL - peaceW;
-      UiPill.draw(graphics, this.font, radiusX, pillY, radiusText, UiTheme.MUTED);
-      UiPill.draw(graphics, this.font, peaceX,  pillY, peaceText,
-         this.state.peaceful() ? UiTheme.OK : UiTheme.BAD);
 
       // Town name label sits just above the (already-placed) EditBox.
       UiText.muted(graphics, this.font, "Town name", innerL, top + OV_NAME_LABEL_Y);

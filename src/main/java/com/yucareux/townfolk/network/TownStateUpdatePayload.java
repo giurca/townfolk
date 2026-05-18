@@ -20,7 +20,7 @@ import net.minecraft.resources.ResourceLocation;
  *
  * Each villager summary carries identity (name/role/persona/backstory) +
  * mind (beliefs/pins/todos/memoryCount) + body (pos/health/activity/inventory
- * /anchors). The town carries name, radius, peaceful flag, log, OpenRouter
+ * /anchors). The town carries name, log, OpenRouter
  * stats, and the storage ledger snapshot.
  *
  * <h2>Aggregate fields (Resources tab)</h2>
@@ -40,8 +40,6 @@ import net.minecraft.resources.ResourceLocation;
 public record TownStateUpdatePayload(
    long townSquarePos,
    String townName,
-   int radius,
-   boolean peaceful,
    String openrouterStatus,
    double openrouterUsage,
    double openrouterLimit,
@@ -312,8 +310,6 @@ public record TownStateUpdatePayload(
          (buf, p) -> {
             buf.writeLong(p.townSquarePos);
             buf.writeUtf(p.townName);
-            buf.writeVarInt(p.radius);
-            buf.writeBoolean(p.peaceful);
             buf.writeUtf(p.openrouterStatus);
             buf.writeDouble(p.openrouterUsage);
             buf.writeDouble(p.openrouterLimit);
@@ -345,8 +341,6 @@ public record TownStateUpdatePayload(
          buf -> {
             long pos = buf.readLong();
             String name = buf.readUtf();
-            int radius = buf.readVarInt();
-            boolean peaceful = buf.readBoolean();
             String orStatus = buf.readUtf();
             double orUsage = buf.readDouble();
             double orLimit = buf.readDouble();
@@ -382,7 +376,7 @@ public record TownStateUpdatePayload(
             int slp  = buf.readVarInt();
             int bToday = buf.readVarInt();
             int dToday = buf.readVarInt();
-            return new TownStateUpdatePayload(pos, name, radius, peaceful, orStatus, orUsage, orLimit, total,
+            return new TownStateUpdatePayload(pos, name, orStatus, orUsage, orLimit, total,
                villagers, townFacts, log, storage,
                agg, resLocs, targets, parcels, popA, popT, idle, work, slp, bToday, dToday);
          }
