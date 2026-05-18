@@ -601,6 +601,11 @@ public final class TownAdminService {
          if (m.contains("died") || m.contains(" has died") || m.contains("was killed")) deathsToday++;
       }
 
+      int tradePostCount = 0;
+      for (var aux : data.auxiliaries()) {
+         if (aux.type() == com.yucareux.townfolk.town.TownAuxiliaryType.TRADE_POST) tradePostCount++;
+      }
+
       PacketDistributor.sendToPlayer(player, new TownStateUpdatePayload(
          town.getBlockPos().asLong(),
          data.townName(),
@@ -618,6 +623,8 @@ public final class TownAdminService {
          parcelSummaries,
          populationAliveTally,
          data.villagers().size(),
+         tradePostCount,
+         data.prestige(),
          idleCountTally,
          workingCountTally,
          sleepingCountTally,

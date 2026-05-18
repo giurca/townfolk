@@ -88,7 +88,7 @@ public final class TownAdminScreen extends Screen {
          Math.round(Math.max(tl.y, br.y)));
    }
 
-   private enum Tab { OVERVIEW, VILLAGERS, RESOURCES, PARCELS, TASKS, LOG }
+   private enum Tab { OVERVIEW, VILLAGERS, RESOURCES, PARCELS, TRADE, TASKS, LOG }
    private enum Mode { NORMAL, SPAWN_FORM, VILLAGER_DETAIL, MEMORIES, BELIEFS_FULL, VILLAGER_LOG }
 
    private TownStateUpdatePayload state;
@@ -228,6 +228,7 @@ public final class TownAdminScreen extends Screen {
                case VILLAGERS -> initVillagersTabWidgets(paneL, paneR, contentTop, contentBottom);
                case RESOURCES -> initResourcesTabWidgets(paneL, paneR, contentTop, contentBottom);
                case PARCELS -> {} // render-only
+               case TRADE -> {} // render-only (placeholder until Stage 3)
                case TASKS -> initTasksTabWidgets(paneL, paneR, contentTop, contentBottom);
                case LOG -> {} // no widgets, render only
             }
@@ -359,6 +360,42 @@ public final class TownAdminScreen extends Screen {
          ).bounds(btnX + 22, y + 2, 18, 18).build());
          y += rowH;
       }
+   }
+
+   /**
+    * Trade tab — Stage 2 placeholder. Just reports that the Trade Post
+    * is bound and the town's current prestige. Real trade content
+    * (visitor archetypes, tiered offers, deliver flow) lands in
+    * Stage 3.
+    */
+   private void renderTradeTab(GuiGraphics graphics, int paneL, int paneR, int top, int bottom) {
+      int innerL = paneL + UiTheme.PADDING;
+      int innerR = paneR - UiTheme.PADDING;
+      int y = top + 10;
+
+      UiText.rightFaint(graphics, this.font,
+         "active offers: 0  ·  prestige: " + this.state.prestige() + " / "
+            + com.yucareux.townfolk.town.TownData.MAX_PRESTIGE,
+         innerR, y);
+      y += 24;
+
+      UiText.heading(graphics, this.font,
+         "Trade Posts: " + this.state.tradePostCount(), innerL, y);
+      y += 14;
+      UiText.faint(graphics, this.font,
+         "Each Trade Post extends town coverage by 64 blocks and unlocks this tab.",
+         innerL, y);
+      y += 22;
+
+      UiText.heading(graphics, this.font, "No active offers", innerL, y);
+      y += 14;
+      UiText.faint(graphics, this.font,
+         "Visiting traders will start leaving notices here once trade content goes live (Stage 3).",
+         innerL, y);
+      y += 12;
+      UiText.faint(graphics, this.font,
+         "One new offer per day. Common tier always; notable / premium tiers unlock with prestige.",
+         innerL, y);
    }
 
    private void renderTasksTab(GuiGraphics graphics, int paneL, int paneR, int top, int bottom) {
@@ -937,6 +974,7 @@ public final class TownAdminScreen extends Screen {
                case VILLAGERS -> renderVillagersTab(graphics, l, r, contentTop, contentBottom, lmX, lmY);
                case RESOURCES -> renderResourcesTab(graphics, l, r, contentTop, contentBottom, lmX, lmY);
                case PARCELS -> renderParcelsTab(graphics, l, r, contentTop, contentBottom, lmX, lmY);
+               case TRADE -> renderTradeTab(graphics, l, r, contentTop, contentBottom);
                case TASKS -> renderTasksTab(graphics, l, r, contentTop, contentBottom);
                case LOG -> renderLogTab(graphics, l, r, contentTop, contentBottom);
             }
@@ -985,14 +1023,19 @@ public final class TownAdminScreen extends Screen {
       for (var vs : this.state.villagers()) {
          for (var t : vs.todos()) if ("open".equals(t.status())) openTodoCount++;
       }
-      return java.util.List.of(
-         UiTabs.tab(Tab.OVERVIEW,  "Overview", 64),
-         UiTabs.tab(Tab.VILLAGERS, "Villagers (" + this.state.populationAlive() + ")", 92),
-         UiTabs.tab(Tab.RESOURCES, "Resources (" + this.state.aggregateResources().size() + ")", 96),
-         UiTabs.tab(Tab.PARCELS,   "Parcels (" + this.state.parcels().size() + ")", 80),
-         UiTabs.tab(Tab.TASKS,     "Tasks (" + openTodoCount + ")", 64),
-         UiTabs.tab(Tab.LOG,       "Activity", 58)
-      );
+      java.util.List<UiTabs.Tab<Tab>> built = new java.util.ArrayList<>();
+      built.add(UiTabs.tab(Tab.OVERVIEW,  "Overview", 64));
+      built.add(UiTabs.tab(Tab.VILLAGERS, "Villagers (" + this.state.populationAlive() + ")", 92));
+      built.add(UiTabs.tab(Tab.RESOURCES, "Resources (" + this.state.aggregateResources().size() + ")", 96));
+      built.add(UiTabs.tab(Tab.PARCELS,   "Parcels (" + this.state.parcels().size() + ")", 80));
+      // Trade tab is gated on the town having at least one Trade Post —
+      // matches the "Trade Post unlocks the feature" design.
+      if (this.state.tradePostCount() > 0) {
+         built.add(UiTabs.tab(Tab.TRADE, "Trade", 52));
+      }
+      built.add(UiTabs.tab(Tab.TASKS,     "Tasks (" + openTodoCount + ")", 64));
+      built.add(UiTabs.tab(Tab.LOG,       "Activity", 58));
+      return built;
    }
 
    private void renderTabs(GuiGraphics graphics, int paneL, int headerBottom) {
@@ -1072,6 +1115,17 @@ public final class TownAdminScreen extends Screen {
    private void renderOverviewBody(GuiGraphics graphics, int paneL, int paneR, int top, int bottom) {
       int innerL = paneL + UiTheme.PADDING;
       int innerR = paneR - UiTheme.PADDING;
+
+      // Town status header — right-aligned under the pulse strip.
+      // Trade Post count + prestige are the new top-level scalars
+      // worth always-visible. Each Trade Post extends town coverage
+      // by 64 blocks; prestige unlocks higher trade tiers.
+      int tradePosts = this.state.tradePostCount();
+      int prestige   = this.state.prestige();
+      String summary = "Trade Posts: " + tradePosts
+                     + "  ·  Prestige: " + prestige + " / "
+                     + com.yucareux.townfolk.town.TownData.MAX_PRESTIGE;
+      UiText.rightFaint(graphics, this.font, summary, innerR, top + OV_NAME_LABEL_Y - 14);
 
       // Town name label sits just above the (already-placed) EditBox.
       UiText.muted(graphics, this.font, "Town name", innerL, top + OV_NAME_LABEL_Y);

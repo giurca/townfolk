@@ -55,6 +55,11 @@ public record TownStateUpdatePayload(
    List<ParcelSummary> parcels,
    int populationAlive,
    int populationTotal,
+   /** Number of registered TRADE_POST auxiliary blocks. Gates the Trade tab. */
+   int tradePostCount,
+   /** Town prestige scalar [0, TownData.MAX_PRESTIGE]. Used by the
+    *  Trade tab v1 placeholder and (Stage 3) by tier gating. */
+   int prestige,
    int idleCount,
    int workingCount,
    int sleepingCount,
@@ -332,6 +337,8 @@ public record TownStateUpdatePayload(
             for (ParcelSummary ps : p.parcels) PARCEL_CODEC.encode(buf, ps);
             buf.writeVarInt(p.populationAlive);
             buf.writeVarInt(p.populationTotal);
+            buf.writeVarInt(p.tradePostCount);
+            buf.writeVarInt(p.prestige);
             buf.writeVarInt(p.idleCount);
             buf.writeVarInt(p.workingCount);
             buf.writeVarInt(p.sleepingCount);
@@ -371,6 +378,8 @@ public record TownStateUpdatePayload(
             for (int i = 0; i < pn; i++) parcels.add(PARCEL_CODEC.decode(buf));
             int popA = buf.readVarInt();
             int popT = buf.readVarInt();
+            int tradePosts = buf.readVarInt();
+            int prestige = buf.readVarInt();
             int idle = buf.readVarInt();
             int work = buf.readVarInt();
             int slp  = buf.readVarInt();
@@ -378,7 +387,9 @@ public record TownStateUpdatePayload(
             int dToday = buf.readVarInt();
             return new TownStateUpdatePayload(pos, name, orStatus, orUsage, orLimit, total,
                villagers, townFacts, log, storage,
-               agg, resLocs, targets, parcels, popA, popT, idle, work, slp, bToday, dToday);
+               agg, resLocs, targets, parcels,
+               popA, popT, tradePosts, prestige,
+               idle, work, slp, bToday, dToday);
          }
       );
 
