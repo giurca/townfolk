@@ -201,6 +201,7 @@ public final class ParcelRoutine {
    public static void onVillagerRemoved(java.util.UUID villagerId) {
       ACTIVE_VISITS.remove(villagerId);
       LACK_WRITES.remove(villagerId);
+      NEED_BARREL_WRITES.remove(villagerId);
    }
 
    /** Sort the villager's parcels for this tick. Rules:

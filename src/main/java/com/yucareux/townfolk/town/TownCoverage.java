@@ -75,16 +75,9 @@ public final class TownCoverage {
       return new TownCoverage(List.of(new Disk(masterPos, masterRadius)));
    }
 
-   /** Convenience: build coverage from a {@link TownData}, using its
-    *  master pos + {@code defaultRadius}. Stage 1.3 will replace this
-    *  with a version that also pulls registered auxiliaries from
-    *  {@code TownData}. */
-   public static TownCoverage of(TownData town, BlockPos masterPos) {
-      return ofMaster(masterPos, town.defaultRadius());
-   }
-
-   /** Build coverage from an explicit list of disks. Mostly for tests
-    *  and for Stage 1.3's multi-source path. */
+   /** Build coverage from an explicit list of disks. Used by
+    *  {@code TownSquareBlockEntity.coverage()} which assembles master +
+    *  auxiliary disks each call. */
    public static TownCoverage of(List<Disk> disks) {
       return new TownCoverage(disks);
    }

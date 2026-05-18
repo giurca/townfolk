@@ -217,7 +217,13 @@ public final class TownfolkNetwork {
          var rl = net.minecraft.resources.ResourceLocation.tryParse(payload.itemId());
          if (rl == null || !net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(rl)) {
             // Treasury held a now-unknown item (mod uninstall, etc.).
-            // We've already removed it from the pool; nothing to give.
+            // We've already removed it from the pool; nothing to give —
+            // tell the player so they know what just happened instead
+            // of just seeing the cell disappear.
+            sp.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                  "Treasury dropped " + actuallyTook + "× " + payload.itemId()
+                  + " — that item no longer exists in this world (mod removed?).")
+               .withStyle(net.minecraft.ChatFormatting.YELLOW), true);
             com.yucareux.townfolk.diag.VerboseLog.write("TREASURY_DROP_UNKNOWN",
                "player=" + sp.getName().getString()
                   + " item=" + payload.itemId() + " count=" + actuallyTook, "");
