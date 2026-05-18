@@ -37,6 +37,17 @@ public final class TownData {
    private int prestige;
    public static final int MAX_PRESTIGE = 1000;
 
+   /** All trade offers posted at this town's Trade Posts, active +
+    *  recently-resolved. The TradeService prunes resolved entries
+    *  daily; UI only renders {@link TradeOffer#isActive()}. */
+   private final List<com.yucareux.townfolk.trade.TradeOffer> tradeOffers;
+
+   /** Set of item-ids the town has ever stockpiled. Trade generation
+    *  filters its archetype pools by this set so a brand-new town
+    *  only gets trades for items it can plausibly fulfil. Grown by
+    *  the TradeDiscoveryService each tick. */
+   private final java.util.Set<String> discoveredItems;
+
    // Daily exchange caps — reset at day rollover.
    private final Map<String, Integer> exchangesByPair = new HashMap<>();
    private final Map<UUID, Integer> exchangesByVillager = new HashMap<>();
@@ -52,6 +63,8 @@ public final class TownData {
       this.townFacts = new ArrayList<>();
       this.auxiliaries = new ArrayList<>();
       this.prestige = 0;
+      this.tradeOffers = new ArrayList<>();
+      this.discoveredItems = new java.util.HashSet<>();
    }
 
    private static String pairKey(UUID a, UUID b) {
@@ -192,6 +205,55 @@ public final class TownData {
       return this.prestige;
    }
 
+   // ───── Trade offers ─────
+
+   /** Live view of all trade offers attached to this town. Includes
+    *  active + recently-resolved (compactor will sweep resolved). */
+   public List<com.yucareux.townfolk.trade.TradeOffer> tradeOffers() {
+      return java.util.Collections.unmodifiableList(this.tradeOffers);
+   }
+
+   public void addTradeOffer(com.yucareux.townfolk.trade.TradeOffer offer) {
+      if (offer == null) return;
+      this.tradeOffers.add(offer);
+   }
+
+   /** Replace the offer with matching id. No-op if not found. */
+   public boolean replaceTradeOffer(com.yucareux.townfolk.trade.TradeOffer updated) {
+      for (int i = 0; i < this.tradeOffers.size(); i++) {
+         if (this.tradeOffers.get(i).id().equals(updated.id())) {
+            this.tradeOffers.set(i, updated);
+            return true;
+         }
+      }
+      return false;
+   }
+
+   public Optional<com.yucareux.townfolk.trade.TradeOffer> findTradeOffer(String id) {
+      for (var o : this.tradeOffers) if (o.id().equals(id)) return Optional.of(o);
+      return Optional.empty();
+   }
+
+   /** Drop every offer in the list that matches {@code filter}.
+    *  Returns the number removed. */
+   public int removeTradeOffersIf(java.util.function.Predicate<com.yucareux.townfolk.trade.TradeOffer> filter) {
+      int before = this.tradeOffers.size();
+      this.tradeOffers.removeIf(filter);
+      return before - this.tradeOffers.size();
+   }
+
+   // ───── Discovered items ─────
+
+   /** True if this is a new addition (set didn't already contain id). */
+   public boolean discoverItem(String itemId) {
+      if (itemId == null || itemId.isBlank()) return false;
+      return this.discoveredItems.add(itemId);
+   }
+
+   public java.util.Set<String> discoveredItems() {
+      return java.util.Collections.unmodifiableSet(this.discoveredItems);
+   }
+
    public CompoundTag save() {
       CompoundTag tag = new CompoundTag();
       tag.putString("townName", this.townName);
@@ -220,6 +282,18 @@ public final class TownData {
       }
       tag.put("auxiliaries", alist);
       tag.putInt("prestige", this.prestige);
+
+      ListTag toffers = new ListTag();
+      for (var o : this.tradeOffers) toffers.add(o.save());
+      tag.put("tradeOffers", toffers);
+
+      ListTag disco = new ListTag();
+      for (String s : this.discoveredItems) {
+         CompoundTag c = new CompoundTag();
+         c.putString("id", s);
+         disco.add(c);
+      }
+      tag.put("discoveredItems", disco);
       return tag;
    }
 
@@ -236,6 +310,24 @@ public final class TownData {
       // back into the legal range.
       int rawPrestige = tag.contains("prestige") ? tag.getInt("prestige") : 0;
       this.prestige = Math.max(0, Math.min(MAX_PRESTIGE, rawPrestige));
+
+      this.tradeOffers.clear();
+      if (tag.contains("tradeOffers")) {
+         ListTag list = tag.getList("tradeOffers", Tag.TAG_COMPOUND);
+         for (int i = 0; i < list.size(); i++) {
+            var loaded = com.yucareux.townfolk.trade.TradeOffer.load(list.getCompound(i));
+            if (loaded != null) this.tradeOffers.add(loaded);
+         }
+      }
+
+      this.discoveredItems.clear();
+      if (tag.contains("discoveredItems")) {
+         ListTag list = tag.getList("discoveredItems", Tag.TAG_COMPOUND);
+         for (int i = 0; i < list.size(); i++) {
+            this.discoveredItems.add(list.getCompound(i).getString("id"));
+         }
+      }
+
       this.auxiliaries.clear();
       if (tag.contains("auxiliaries")) {
          ListTag list = tag.getList("auxiliaries", Tag.TAG_COMPOUND);
