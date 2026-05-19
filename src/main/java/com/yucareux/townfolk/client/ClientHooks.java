@@ -63,5 +63,11 @@ public final class ClientHooks {
       mc.setScreen(new com.yucareux.townfolk.client.screen.AnimalPlanScreen(payload));
    }
 
+   public static void openBuildingPermitScreen(
+         com.yucareux.townfolk.network.OpenBuildingPermitPayload payload) {
+      Minecraft mc = Minecraft.getInstance();
+      mc.setScreen(new com.yucareux.townfolk.client.screen.BuildingPermitScreen(payload));
+   }
+
    private ClientHooks() {}
 }

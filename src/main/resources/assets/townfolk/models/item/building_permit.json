@@ -1,0 +1,7 @@
+{
+  "_comment": "Use vanilla paper as the sprite. A custom texture (rolled scroll w/ wax seal) would be nicer but ships fine with vanilla.",
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "minecraft:item/paper"
+  }
+}

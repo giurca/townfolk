@@ -106,6 +106,17 @@ public final class ModRegistries {
       () -> new com.yucareux.townfolk.item.SurveyorStakeItem(new Item.Properties().stacksTo(16))
    );
 
+   /** Building Permit — single-use document the player right-clicks a
+    *  building marker block (Charter Stone, bed, future workshop /
+    *  library markers) with to override the default volume / height
+    *  caps on that specific building. Consumed on Apply; no effect
+    *  if the click target isn't a marker block. Stack size 16 so
+    *  players can carry a few for batch construction. */
+   public static final Supplier<Item> BUILDING_PERMIT = ITEMS.register(
+      "building_permit",
+      () -> new com.yucareux.townfolk.item.BuildingPermitItem(new Item.Properties().stacksTo(16))
+   );
+
    public static final Supplier<BlockEntityType<TownSquareBlockEntity>> TOWN_SQUARE_BE =
       BLOCK_ENTITIES.register(
          "town_square",
@@ -152,9 +163,10 @@ public final class ModRegistries {
     *  correctly). Without this, items only show up in registry-wide search. */
    private static void onBuildCreativeTabs(
          net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent event) {
-      // Surveyor's Stake → Tools & Utilities tab.
+      // Surveyor's Stake + Building Permit → Tools & Utilities tab.
       if (event.getTabKey() == net.minecraft.world.item.CreativeModeTabs.TOOLS_AND_UTILITIES) {
          event.accept(SURVEYOR_STAKE.get());
+         event.accept(BUILDING_PERMIT.get());
       }
       // Trade Post → Functional Blocks tab. Town Square is auto-
       // inserted into this same tab by NeoForge (BlockItem default

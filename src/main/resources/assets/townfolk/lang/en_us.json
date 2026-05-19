@@ -4,5 +4,6 @@
   "block.townfolk.trade_post": "Trade Post",
   "item.townfolk.trade_post": "Trade Post",
   "config.jade.plugin_townfolk.townsfolk_info": "Townsfolk Info",
-  "item.townfolk.surveyor_stake": "Surveyor's Stake"
+  "item.townfolk.surveyor_stake": "Surveyor's Stake",
+  "item.townfolk.building_permit": "Building Permit"
 }

@@ -1,0 +1,18 @@
+{
+  "_comment": "Building Permit — single-use override doc for the per-building volume/height caps. PPP / .I. / .E. (rows: paper, paper, paper / ink_sac centred / emerald centred). 3 paper + 1 ink + 1 emerald → 1 permit. Mid-cost so they're deliberate purchases, not casual sprinkles.",
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "PPP",
+    " I ",
+    " E "
+  ],
+  "key": {
+    "P": { "item": "minecraft:paper" },
+    "I": { "item": "minecraft:ink_sac" },
+    "E": { "item": "minecraft:emerald" }
+  },
+  "result": {
+    "id": "townfolk:building_permit",
+    "count": 1
+  }
+}

@@ -151,6 +151,162 @@ public final class TownfolkNetwork {
          SetAnimalPlanPayload.STREAM_CODEC,
          TownfolkNetwork::onSetAnimalPlan
       );
+
+      // Building Permit: server opens the modal with a snapshot of the
+      // marker's current state (S→C); client commits the override edit
+      // via Apply (C→S), which is when the permit is actually consumed.
+      registrar.playToClient(
+         OpenBuildingPermitPayload.TYPE,
+         OpenBuildingPermitPayload.STREAM_CODEC,
+         TownfolkNetwork::onOpenBuildingPermit
+      );
+      registrar.playToServer(
+         ApplyBuildingPermitPayload.TYPE,
+         ApplyBuildingPermitPayload.STREAM_CODEC,
+         TownfolkNetwork::onApplyBuildingPermit
+      );
+   }
+
+   private static void onOpenBuildingPermit(OpenBuildingPermitPayload payload, IPayloadContext ctx) {
+      if (FMLEnvironment.dist != Dist.CLIENT) return;
+      ctx.enqueueWork(() -> ClientHooks.openBuildingPermitScreen(payload));
+   }
+
+   /** Hard caps mirrored from {@code BuildingPermitScreen}. We re-clamp
+    *  here so a tampered client can't push absurd values past the UI
+    *  limits. */
+   private static final int OVERRIDE_VOLUME_MAX = 8192;
+   private static final int OVERRIDE_HEIGHT_MAX = 48;
+
+   private static void onApplyBuildingPermit(ApplyBuildingPermitPayload payload, IPayloadContext ctx) {
+      ctx.enqueueWork(() -> {
+         if (!(ctx.player() instanceof net.minecraft.server.level.ServerPlayer sp)) return;
+         net.minecraft.server.level.ServerLevel level = sp.serverLevel();
+         net.minecraft.core.BlockPos markerPos = net.minecraft.core.BlockPos.of(payload.markerPos());
+
+         // 1) The marker must still resolve to a recognized building.
+         //    If the player broke it between opening the modal and
+         //    clicking Apply, drop quietly with a chat hint — don't
+         //    consume the permit.
+         var existingOpt = com.yucareux.townfolk.building.BuildingRegistry.findByMarker(level, markerPos);
+         if (existingOpt.isEmpty()) {
+            sp.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                  "Permit target no longer exists.")
+               .withStyle(net.minecraft.ChatFormatting.YELLOW), true);
+            com.yucareux.townfolk.diag.VerboseLog.write("PERMIT_APPLY_REJECT",
+               "player=" + sp.getName().getString()
+                  + " pos=" + markerPos.toShortString()
+                  + " reason=no_building", "");
+            return;
+         }
+         var existing = existingOpt.get();
+
+         // 2) Auth: anyone within the marker's likely "scope" can edit it.
+         //    We don't have a town tied to a permit click directly, but we
+         //    do have permission + singleplayer + proximity-to-marker as a
+         //    reasonable gate. 32-block radius matches the inactive-search
+         //    fallback comfortably.
+         boolean allowed = sp.hasPermissions(2)
+            || (level.getServer() != null && level.getServer().isSingleplayer())
+            || sp.blockPosition().distSqr(markerPos) <= 32 * 32;
+         if (!allowed) {
+            com.yucareux.townfolk.diag.VerboseLog.write("PERMIT_APPLY_REJECT",
+               "player=" + sp.getName().getString()
+                  + " pos=" + markerPos.toShortString()
+                  + " reason=unauthorised", "");
+            return;
+         }
+
+         // 3) Player must actually be holding (or carrying) a permit.
+         var permitItem = com.yucareux.townfolk.registry.ModRegistries.BUILDING_PERMIT.get();
+         int permitSlot = findPermitSlot(sp, permitItem);
+         if (permitSlot < 0) {
+            sp.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                  "No Building Permit in inventory.")
+               .withStyle(net.minecraft.ChatFormatting.YELLOW), true);
+            com.yucareux.townfolk.diag.VerboseLog.write("PERMIT_APPLY_REJECT",
+               "player=" + sp.getName().getString()
+                  + " pos=" + markerPos.toShortString()
+                  + " reason=no_permit", "");
+            return;
+         }
+
+         // 4) Clamp + sanitize the requested override. -1 means "use
+         //    template default" (clear that field's override).
+         int rawVol = payload.maxVolume();
+         int rawHgt = payload.maxHeight();
+         int newVol = rawVol < 0 ? -1 : Math.min(rawVol, OVERRIDE_VOLUME_MAX);
+         int newHgt = rawHgt < 0 ? -1 : Math.min(rawHgt, OVERRIDE_HEIGHT_MAX);
+         // Floor at 1 — 0 makes no sense and would brick the building.
+         if (newVol == 0) newVol = 1;
+         if (newHgt == 0) newHgt = 1;
+
+         // If both fields collapse to "default", store the NONE sentinel
+         // for a tidy NBT footprint.
+         com.yucareux.townfolk.building.BuildingOverride newOverride =
+            (newVol < 0 && newHgt < 0)
+               ? com.yucareux.townfolk.building.BuildingOverride.NONE
+               : new com.yucareux.townfolk.building.BuildingOverride(newVol, newHgt);
+
+         // Cheap idempotence: if nothing changed, don't burn the permit.
+         var oldOverride = existing.override();
+         if (oldOverride.maxVolume() == newOverride.maxVolume()
+             && oldOverride.maxHeight() == newOverride.maxHeight()) {
+            sp.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                  "Permit unchanged — no edit made.")
+               .withStyle(net.minecraft.ChatFormatting.GRAY), true);
+            com.yucareux.townfolk.diag.VerboseLog.write("PERMIT_APPLY_NOOP",
+               "player=" + sp.getName().getString()
+                  + " pos=" + markerPos.toShortString(), "");
+            return;
+         }
+
+         // 5) Write the new override, re-validate, consume the permit.
+         com.yucareux.townfolk.building.BuildingRegistry.put(level,
+            existing.withOverride(newOverride));
+         com.yucareux.townfolk.building.BuildingRegistry.invalidate(level, markerPos);
+
+         sp.getInventory().getItem(permitSlot).shrink(1);
+         sp.getInventory().setChanged();
+
+         // Chat back the new status so the player knows whether the
+         // edited caps now pass recognition.
+         var refreshed = com.yucareux.townfolk.building.BuildingRegistry
+            .findByMarker(level, markerPos).orElse(null);
+         boolean nowActive = refreshed != null && refreshed.active();
+         String volLabel = newVol < 0 ? "default" : String.valueOf(newVol);
+         String hgtLabel = newHgt < 0 ? "default" : String.valueOf(newHgt);
+         sp.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+               "Permit applied — vol=" + volLabel
+                  + ", height=" + hgtLabel
+                  + (nowActive ? " (valid)" : " (not valid)"))
+            .withStyle(nowActive
+               ? net.minecraft.ChatFormatting.GREEN
+               : net.minecraft.ChatFormatting.YELLOW), false);
+         com.yucareux.townfolk.diag.VerboseLog.write("PERMIT_APPLY",
+            "player=" + sp.getName().getString()
+               + " pos=" + markerPos.toShortString()
+               + " template=" + existing.templateId()
+               + " maxVolume=" + newVol
+               + " maxHeight=" + newHgt
+               + " active=" + nowActive, "");
+      });
+   }
+
+   /** Scan the player's inventory for a single Building Permit slot.
+    *  Hotbar first (player is most likely holding one), then main
+    *  inventory. Returns -1 if none. Off-hand intentionally not
+    *  checked — useOn already runs with the main-hand stack. */
+   private static int findPermitSlot(net.minecraft.server.level.ServerPlayer sp,
+                                      net.minecraft.world.item.Item permitItem) {
+      var inv = sp.getInventory();
+      // Main hand first.
+      if (inv.getSelected().is(permitItem)) return inv.selected;
+      // Then full main inventory (hotbar + backpack).
+      for (int i = 0; i < inv.items.size(); i++) {
+         if (inv.items.get(i).is(permitItem)) return i;
+      }
+      return -1;
    }
 
    private static void onOpenAnimalPlan(OpenAnimalPlanPayload payload, IPayloadContext ctx) {

@@ -1380,7 +1380,7 @@ public final class TownAdminScreen extends Screen {
 
       int x = innerL;
       UiCard.draw(graphics, this.font, x, top, cardW, cardH,
-         "Population", alive + " / " + tot,
+         "Residents", alive + " / " + tot,
          (tot - alive) == 0 ? "all alive" : (tot - alive) + " gone");
       x += cardW + gap;
       UiCard.draw(graphics, this.font, x, top, cardW, cardH,
