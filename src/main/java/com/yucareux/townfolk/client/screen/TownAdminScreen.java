@@ -266,7 +266,11 @@ public final class TownAdminScreen extends Screen {
    private static final int OV_PULSE_Y      = 4;
    /** One row of pulse cards (counters only). */
    private static final int OV_PULSE_H      = UiTheme.CARD_HEIGHT;
-   private static final int OV_NAME_LABEL_Y = OV_PULSE_Y + OV_PULSE_H + 18;
+   /** Town-status summary lives between the pulse strip and the Town
+    *  Name input. Two right-aligned lines (cap, trade) need ~22 px of
+    *  vertical room. The label moves down by that amount so the stats
+    *  never overlap the pulse cards above. */
+   private static final int OV_NAME_LABEL_Y = OV_PULSE_Y + OV_PULSE_H + 28;
    private static final int OV_NAME_BOX_Y   = OV_NAME_LABEL_Y + 12;
    private static final int OV_STATUS_Y     = OV_NAME_BOX_Y + 30;
    private static final int OV_REFRESH_Y    = OV_STATUS_Y;
@@ -1432,8 +1436,12 @@ public final class TownAdminScreen extends Screen {
       String tradeLine = "Trade Posts: " + tradePosts
                        + "  ·  Prestige: " + prestige + " / "
                        + com.yucareux.townfolk.town.TownData.MAX_PRESTIGE;
-      UiText.rightFaint(graphics, this.font, capLine,   innerR, top + OV_NAME_LABEL_Y - 24);
-      UiText.rightFaint(graphics, this.font, tradeLine, innerR, top + OV_NAME_LABEL_Y - 14);
+      // Two stat lines sit in the 28-px gap between the pulse strip and
+      // the Town Name label. Each line is ~10 px tall.
+      UiText.rightFaint(graphics, this.font, capLine,
+         innerR, top + OV_PULSE_Y + OV_PULSE_H + 4);
+      UiText.rightFaint(graphics, this.font, tradeLine,
+         innerR, top + OV_PULSE_Y + OV_PULSE_H + 14);
 
       // Town name label sits just above the (already-placed) EditBox.
       UiText.muted(graphics, this.font, "Town name", innerL, top + OV_NAME_LABEL_Y);
@@ -2059,17 +2067,21 @@ public final class TownAdminScreen extends Screen {
       int contentTop = top + 10;
       int listBottom = bottom - spawnBtnH;
 
-      // Top row: search box label + filter chip strip (drawn). The
-      // EditBox itself was placed by initVillagersTabWidgets at top+4
-      // (innerL .. innerL+240).
-      int chipsX = innerL + 246;
-      int chipsY = top + 4;
+      // Row 1: search box (already placed at top+4 by
+      // initVillagersTabWidgets, innerL..innerL+240) and the
+      // right-aligned column hint for the per-villager calls/tokens/cost
+      // figures rendered on each row.
+      UiText.rightFaint(graphics, this.font, "calls / tokens / cost", innerR, top + 8);
+
+      // Row 2: filter chips on their own line below the search box.
+      // 10 chips (6 prof + 4 status) plus two row labels won't share a
+      // line with a 240-wide search box without colliding with the
+      // right-aligned column hint — stack them.
+      int chipsX = innerL;
+      int chipsY = top + 26;
       renderVillagerFilterChips(graphics, chipsX, chipsY, mouseX, mouseY);
 
-      // Right-aligned column hint pinned alongside the filter row.
-      UiText.rightFaint(graphics, this.font, "calls / tokens / cost", innerR, chipsY + 4);
-
-      int listTop = top + 28;             // below the filter row
+      int listTop = top + 48;             // below the chip row
       List<TownStateUpdatePayload.VillagerSummary> villagers = filteredVillagers();
       if (villagers.isEmpty()) {
          if (this.state.villagers().isEmpty()) {
@@ -2149,10 +2161,12 @@ public final class TownAdminScreen extends Screen {
       return cx;
    }
 
-   /** Hit-test for the chip row. Returns the (group, value) selected, or null. */
+   /** Hit-test for the chip row. Returns the (group, value) selected, or null.
+    *  Must mirror the (x, y) used by {@link #renderVillagersBody} / the
+    *  chipsX, chipsY locals there. */
    private String[] hitTestVillagerChips(double mouseX, double mouseY, int paneL, int top) {
-      int x = paneL + UiTheme.PADDING + 246;
-      int y = top + 4;
+      int x = paneL + UiTheme.PADDING;
+      int y = top + 26;
       String[] profs = {"all", "farmer", "shepherd", "butcher", "mason", "none"};
       String[] stats = {"all", "working", "idle", "sleeping"};
       int cx = x + this.font.width("Prof:") + 4;
