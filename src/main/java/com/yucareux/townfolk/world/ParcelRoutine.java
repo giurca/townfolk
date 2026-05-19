@@ -1677,6 +1677,46 @@ public final class ParcelRoutine {
       DEPOSIT_RULES = java.util.Collections.unmodifiableMap(m);
    }
 
+   /** Resolve a deposit destination for {@code item} in two steps:
+    *
+    *  <ol>
+    *    <li>{@code findNearestForDeposit} — nearest barrel whose filter
+    *        already accepts the item. Always tried first so a curated
+    *        whitelist stays curated.
+    *    <li>{@code adoptNearestForDeposit} — last-resort: nearest
+    *        whitelist barrel that has both a free filter slot AND a
+    *        free inventory slot. The item is auto-added to that
+    *        barrel's whitelist and the deposit lands there. A
+    *        TownLog entry is pushed so the player sees the storage
+    *        layout adapted on its own.
+    *  </ol>
+    *
+    *  Returns empty only when NO barrel can take the item — meaning
+    *  the existing {@code [need:barrel_for_X]} hail is still warranted
+    *  (player needs to place another barrel or empty an existing one).
+    */
+   private static java.util.Optional<com.yucareux.townfolk.town.TownTreasury.Hit>
+   resolveDepositTarget(WorkProductionService.Ctx ctx, Item item, String itemId) {
+      var direct = com.yucareux.townfolk.town.TownTreasury.findNearestForDeposit(
+         ctx.level(), ctx.actor().blockPosition(), item);
+      if (direct.isPresent()) return direct;
+      var adopted = com.yucareux.townfolk.town.TownTreasury.adoptNearestForDeposit(
+         ctx.level(), ctx.actor().blockPosition(), item);
+      if (adopted.isEmpty()) return adopted;
+      // Surface the autonomous storage change so the player isn't
+      // left wondering why their curated whitelist now contains
+      // hemp_fiber. INFO log entry — visible in the TownAdminScreen
+      // Town tab, not a blocking chat hail.
+      ctx.town().getTown().log().add(ctx.level().getGameTime(),
+         com.yucareux.townfolk.town.TownLog.Level.INFO,
+         ctx.entry().name() + " stashed "
+            + itemId.substring(itemId.indexOf(':') + 1).replace('_', ' ')
+            + " in the barrel at "
+            + adopted.get().pos().toShortString()
+            + " — added to its whitelist.");
+      return adopted;
+   }
+
    /** If the villager is carrying more than the reserve of any depositable
     *  crop / product, fire a {@code deposit N <item>} verb. ToolDispatcher
     *  auto-routes the walk to the nearest barrel via TownTreasury. One item
@@ -1707,8 +1747,7 @@ public final class ParcelRoutine {
          }
          Item rulItem = BuiltInRegistries.ITEM.get(net.minecraft.resources.ResourceLocation.parse(e.getKey()));
          if (rulItem == null) continue;
-         var dest = com.yucareux.townfolk.town.TownTreasury.findNearestForDeposit(
-            ctx.level(), ctx.actor().blockPosition(), rulItem);
+         var dest = resolveDepositTarget(ctx, rulItem, e.getKey());
          if (dest.isEmpty()) {
             VerboseLog.write("PARCEL_DEPOSIT_NO_DEST", "actor=" + ctx.entry().name()
                + " item=" + e.getKey() + " surplus=" + surplus,
@@ -1748,8 +1787,7 @@ public final class ParcelRoutine {
                  .append(", trigger=").append(DEFAULT_CROP_TRIGGER).append(",fallback) ");
             continue;
          }
-         var dest = com.yucareux.townfolk.town.TownTreasury.findNearestForDeposit(
-            ctx.level(), ctx.actor().blockPosition(), it);
+         var dest = resolveDepositTarget(ctx, it, itemId);
          if (dest.isEmpty()) {
             VerboseLog.write("PARCEL_DEPOSIT_NO_DEST", "actor=" + ctx.entry().name()
                + " item=" + itemId + " surplus=" + have + " fallback=crop-tag",

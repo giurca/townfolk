@@ -183,6 +183,70 @@ public final class TownTreasury {
       return best == null ? Optional.empty() : Optional.of(new TaggedHit(best, bestItem));
    }
 
+   /** Adopt the nearest registered container that has both a live
+    *  inventory slot AND a free filter slot (whitelist mode) onto
+    *  {@code item}: add {@code item} to its whitelist, persist, return
+    *  the Hit. Called as a last-resort fallback when
+    *  {@link #findNearestForDeposit} returns empty — instead of
+    *  letting the villager hail the player for a new barrel, the
+    *  routine adapts the existing storage to what's actually being
+    *  produced.
+    *
+    *  <p>Blacklist-mode containers are silently skipped — they already
+    *  accept anything not on their reject list, so {@code findNearestForDeposit}
+    *  would have picked them up. If none qualifies (full barrels, no
+    *  free filter slot, container isn't a real inventory), returns empty.
+    *
+    *  <p>Caller is expected to log the adoption + push a TownLog entry
+    *  so the player sees the autonomous change. */
+   public static Optional<Hit> adoptNearestForDeposit(ServerLevel level, BlockPos from, Item item) {
+      Hit best = null;
+      long bestD = Long.MAX_VALUE;
+      int considered = 0, candidates = 0;
+      for (var e : StorageRegistry.entries(level)) {
+         considered++;
+         BlockPos pos = BlockPos.of(e.getKey());
+         StorageConfig cfg = e.getValue();
+         // Only whitelist barrels need adopting — blacklist would have
+         // accepted already (and we don't want to silently mutate
+         // a player's explicit blacklist either).
+         if (cfg.mode() != StorageFilterMode.WHITELIST) continue;
+         // Needs at least one empty filter slot to add the item to.
+         int filterSpace = StorageConfig.FILTER_SLOTS - cfg.filterCount();
+         if (filterSpace <= 0) continue;
+         // Needs at least one free inventory slot, else "adopting" it
+         // still leaves the deposit failing on the next step.
+         if (freeSlots(level, pos) <= 0) continue;
+         candidates++;
+         long d = distSq(pos, from);
+         if (d < bestD) {
+            bestD = d;
+            best = new Hit(pos, cfg, liveContents(level, pos));
+         }
+      }
+      VerboseLog.write("STORAGE_ADOPT_SCAN",
+         "item=" + BuiltInRegistries.ITEM.getKey(item) + " from=" + from.toShortString()
+            + " considered=" + considered + " candidates=" + candidates
+            + " pick=" + (best == null ? "null" : best.pos().toShortString()), "");
+      if (best == null) return Optional.empty();
+      // Mutate the config in place — find the first empty filter slot
+      // and stamp the item into it.
+      for (int i = 0; i < StorageConfig.FILTER_SLOTS; i++) {
+         if (best.config().filter().get(i).isEmpty()) {
+            best.config().setFilterSlot(i, new ItemStack(item, 1));
+            break;
+         }
+      }
+      // Persist the mutation. StorageRegistry's setDirty is implicit
+      // in put — re-putting the same cfg flips it.
+      StorageRegistry.put(level, best.pos(), best.config());
+      VerboseLog.write("STORAGE_AUTO_ACCEPT",
+         "item=" + BuiltInRegistries.ITEM.getKey(item) + " pos=" + best.pos().toShortString()
+            + " filterCount=" + best.config().filterCount(),
+         "auto-added to whitelist so deposit can land");
+      return Optional.of(best);
+   }
+
    /** Nearest registered container whose filter ACCEPTS {@code item} AND
     *  has free space. Falls back to "accepts but full" if no slot is
     *  open, with a log warning. Returns empty when no registered
