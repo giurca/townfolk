@@ -1,7 +1,6 @@
 package com.yucareux.townfolk.building;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -85,30 +84,26 @@ public final class BuildingTemplates {
       // ── Town Hall ──
       // Marker is the Charter Stone (registered as townfolk:town_square
       // internally for save-compat; renamed at the lang layer to
-      // "Charter Stone"). Requires the Charter Stone itself + a door
-      // + a banner (any colour) — banners are the "official flag" of
-      // the town hall and force the player to add a recognizable
-      // civic decoration.
+      // "Charter Stone"). The Stone + door + a 16 m² enclosed room
+      // are the only requirements.
+      //
+      // No required furniture: the previous "1× white banner" check
+      // was too brittle — banners come in 16 colors AND wall-mounted
+      // vs standing are distinct block IDs, so a player with a blue
+      // wall-banner failed validation despite obviously meeting the
+      // intent. The Charter Stone itself is the civic flag.
       //
       // NOTE: We resolve the Charter Stone via the namespaced ID
       // since referencing TOWNFOLK's own registry from a constant
       // initializer would trip ordering. ModRegistries.TOWN_SQUARE_BLOCK
       // is read lazily here at first-access.
       Block charterStone = com.yucareux.townfolk.registry.ModRegistries.TOWN_SQUARE_BLOCK.get();
-      LinkedHashMap<Block, Integer> townHallReq = new LinkedHashMap<>();
-      // Banners come in 16 colors; rather than listing 16 entries
-      // separately, we check at recognition time. For the template
-      // declaration we list one (white) and the recognizer's furniture
-      // tally will sum across all banner colors via a custom check —
-      // but for v1 simplicity we just count white banners. A
-      // future refinement: a "tag-based" required-furniture entry.
-      townHallReq.put(Blocks.WHITE_BANNER, 1);
       out.add(new BuildingTemplate(
          TOWN_HALL,
          List.of(charterStone),
-         townHallReq,
+         Map.of(),         // no furniture requirement
          true,             // requires door
-         16, 3,            // 16 m² floor, 3 blocks tall
+         16, 2,            // 16 m² floor, 2 blocks of interior height (same as Home)
          1024, 12
       ));
 

@@ -9,12 +9,15 @@ import java.util.Map;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 /**
  * Bounded flood-fill + composite-scoring building recognition.
@@ -245,15 +248,35 @@ public final class BuildingRecognizer {
       return false;
    }
 
-   /** Match vanilla doors (DoorBlock instanceof) AND mod-added doors
-    *  that don't extend DoorBlock but DO belong to the vanilla
-    *  {@code #minecraft:doors} block tag — e.g. Dramatic Doors'
-    *  LargeDoorBlock. Tag membership is the standard contract mods
-    *  use to declare "this acts like a door." */
+   /** Match vanilla doors, tagged doors, AND structurally-door-like
+    *  mod blocks that don't follow either convention.
+    *
+    *  <p>Three layers of detection, falling through in order:
+    *  <ol>
+    *    <li>{@code instanceof DoorBlock} — vanilla and any mod that
+    *        extends the base class.
+    *    <li>{@code #minecraft:doors} block tag — the standard
+    *        cross-mod contract.
+    *    <li>Structural signature: any block with the OPEN
+    *        BooleanProperty AND with "door" in its registry path.
+    *        Catches mods like Dramatic Doors, which registers
+    *        {@code dramaticdoors:short_oak_door} etc. into its OWN
+    *        tag ({@code dramaticdoors:short_doors}) instead of the
+    *        vanilla one. Trapdoors and fence gates also have OPEN
+    *        but get filtered above by their dedicated instanceof
+    *        checks — and "door" isn't in their registry paths
+    *        either.
+    *  </ol> */
    private static boolean isDoorLike(BlockState s) {
       Block b = s.getBlock();
       if (b instanceof DoorBlock) return true;
-      return s.is(BlockTags.DOORS);
+      if (b instanceof TrapDoorBlock || b instanceof FenceGateBlock) return false;
+      if (s.is(BlockTags.DOORS)) return true;
+      if (s.hasProperty(BlockStateProperties.OPEN)) {
+         var rl = BuiltInRegistries.BLOCK.getKey(b);
+         if (rl != null && rl.getPath().contains("door")) return true;
+      }
+      return false;
    }
 
    /** Same logic for trapdoors — match instanceof OR the
