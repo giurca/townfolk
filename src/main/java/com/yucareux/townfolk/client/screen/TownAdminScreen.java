@@ -101,10 +101,11 @@ public final class TownAdminScreen extends Screen {
     *  {@link #resourcesGridScrollRows}. */
    private int villagersGridScrollRows = 0;
 
-   /** Cached villager-tile icon. Vanilla villagers don't have an item
-    *  form to render in a grid cell, so we re-use the villager spawn
-    *  egg sprite — universally recognisable and ships with the game. */
-   private net.minecraft.world.item.ItemStack villagerIconStack;
+   /** Profession id → cached ItemStack used as that profession's tile
+    *  icon. Built lazily on first lookup; reused across frames. Falls
+    *  back to villager_spawn_egg for unknown / "none" professions. */
+   private final java.util.Map<String, net.minecraft.world.item.ItemStack> villagerIconByProfession =
+      new java.util.HashMap<>();
    // ── New for redesigned tabs ──
    /** Row-level scroll offset for the Resources grid. Driven by the
     *  mouse wheel; clamped at render time once the row count is known. */
@@ -2673,14 +2674,12 @@ public final class TownAdminScreen extends Screen {
          g.drawString(this.font, anchor, x + VILL_CELL_W - aw - 4, y + 2, FG_DIM, true);
       }
 
-      // Spawn-egg icon, centred.
-      if (this.villagerIconStack == null) {
-         this.villagerIconStack = new net.minecraft.world.item.ItemStack(
-            net.minecraft.world.item.Items.VILLAGER_SPAWN_EGG);
-      }
+      // Profession-themed icon, centred. Each profession maps to a
+      // recognisable tool/output item; "none"/unknown falls back to a
+      // villager spawn egg.
       int iconX = x + (VILL_CELL_W - 16) / 2;
       int iconY = y + 12;
-      g.renderItem(this.villagerIconStack, iconX, iconY);
+      g.renderItem(iconForProfession(v.profession()), iconX, iconY);
 
       // Name centred — truncated to fit. Dim if dead.
       String name = v.name() + (v.alive() ? "" : " ✝");
@@ -2785,6 +2784,32 @@ public final class TownAdminScreen extends Screen {
          cx += w + 3;
       }
       return null;
+   }
+
+   /** Map a profession name to a tile icon. Lazily caches each stack
+    *  so renderItem isn't paying a registry lookup every frame. */
+   private net.minecraft.world.item.ItemStack iconForProfession(String prof) {
+      String key = prof == null ? "" : prof.toLowerCase(Locale.ROOT);
+      return this.villagerIconByProfession.computeIfAbsent(key, k -> {
+         net.minecraft.world.item.Item item = switch (k) {
+            case "farmer"        -> net.minecraft.world.item.Items.WHEAT;
+            case "shepherd"      -> net.minecraft.world.item.Items.SHEARS;
+            case "butcher"       -> net.minecraft.world.item.Items.COOKED_BEEF;
+            case "mason"         -> net.minecraft.world.item.Items.SMOOTH_STONE;
+            case "librarian"     -> net.minecraft.world.item.Items.ENCHANTED_BOOK;
+            case "cartographer"  -> net.minecraft.world.item.Items.FILLED_MAP;
+            case "fisherman"     -> net.minecraft.world.item.Items.FISHING_ROD;
+            case "fletcher"      -> net.minecraft.world.item.Items.BOW;
+            case "toolsmith"     -> net.minecraft.world.item.Items.IRON_PICKAXE;
+            case "weaponsmith"   -> net.minecraft.world.item.Items.IRON_SWORD;
+            case "armorer"       -> net.minecraft.world.item.Items.IRON_CHESTPLATE;
+            case "leatherworker" -> net.minecraft.world.item.Items.LEATHER;
+            case "cleric"        -> net.minecraft.world.item.Items.BREWING_STAND;
+            case "nitwit"        -> net.minecraft.world.item.Items.POPPY;
+            default               -> net.minecraft.world.item.Items.VILLAGER_SPAWN_EGG;
+         };
+         return new net.minecraft.world.item.ItemStack(item);
+      });
    }
 
    /** Hit-test the villager grid. Mirrors the layout used by
