@@ -1,7 +1,7 @@
 package com.yucareux.townfolk.registry;
 
 import com.yucareux.townfolk.Townfolk;
-import com.yucareux.townfolk.block.TownSquareBlock;
+import com.yucareux.townfolk.block.CharterStoneBlock;
 import com.yucareux.townfolk.block.TradePostBlock;
 import com.yucareux.townfolk.blockentity.TownSquareBlockEntity;
 import com.yucareux.townfolk.blockentity.TradePostBlockEntity;
@@ -76,13 +76,21 @@ public final class ModRegistries {
             .build()
       );
 
-   public static final Supplier<TownSquareBlock> TOWN_SQUARE_BLOCK = BLOCKS.register(
+   /** Charter Stone — town anchor block.
+    *
+    *  Registry id stays {@code town_square} for save-file compatibility
+    *  with worlds that predate the rename. Class + display name + model
+    *  have been updated to "Charter Stone." */
+   public static final Supplier<CharterStoneBlock> TOWN_SQUARE_BLOCK = BLOCKS.register(
       "town_square",
-      () -> new TownSquareBlock(BlockBehaviour.Properties.of()
-         .mapColor(MapColor.WOOD)
+      () -> new CharterStoneBlock(BlockBehaviour.Properties.of()
+         .mapColor(MapColor.STONE)
          .strength(3.5F, 6.0F)
          .requiresCorrectToolForDrops()
-         .sound(SoundType.WOOD))
+         .sound(SoundType.STONE)
+         // Monolith model is non-cube — neighbour faces would otherwise
+         // get culled where they touch the bounding cube.
+         .noOcclusion())
    );
 
    public static final Supplier<Item> TOWN_SQUARE_ITEM = ITEMS.register(

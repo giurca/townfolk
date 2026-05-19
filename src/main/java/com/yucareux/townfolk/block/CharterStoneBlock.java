@@ -18,18 +18,25 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 
 /**
- * Town Square — anchor block for an LLM-villager town. Right-clicking it opens
- * the town admin UI (server-driven, networked to a custom Screen).
+ * Charter Stone — anchor block for a town. Right-clicking opens the
+ * town admin UI.
  *
- * This release: no UI yet. Right-click just prints the current state line to
- * chat so we can verify persistence works end-to-end before bolting on the
- * Screen + network packets.
+ * <p>Renamed from "Town Square" in Stage 10a. The block-registry ID
+ * stays as {@code townfolk:town_square} for save compatibility —
+ * worlds created before the rename keep loading. The class name,
+ * display name, and visual model all use the new naming.
+ *
+ * <p>Doubles as the marker block for the Town Hall building (see
+ * {@link com.yucareux.townfolk.building.BuildingTemplates#TOWN_HALL}).
+ * Place a Charter Stone, enclose it in a small room with a door and
+ * a banner, and the town hall is recognized — granting +4 to the
+ * population cap.
  */
-public class TownSquareBlock extends BaseEntityBlock {
+public class CharterStoneBlock extends BaseEntityBlock {
 
-   public static final MapCodec<TownSquareBlock> CODEC = simpleCodec(TownSquareBlock::new);
+   public static final MapCodec<CharterStoneBlock> CODEC = simpleCodec(CharterStoneBlock::new);
 
-   public TownSquareBlock(BlockBehaviour.Properties properties) {
+   public CharterStoneBlock(BlockBehaviour.Properties properties) {
       super(properties);
    }
 
@@ -46,6 +53,8 @@ public class TownSquareBlock extends BaseEntityBlock {
 
    @Override
    protected RenderShape getRenderShape(BlockState state) {
+      // Custom monolith model — needs MODEL render type to draw the
+      // non-cube geometry.
       return RenderShape.MODEL;
    }
 

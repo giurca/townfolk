@@ -1,8 +1,51 @@
 {
-  "parent": "minecraft:block/cube_bottom_top",
+  "_comment": "Charter Stone monolith. Three stepped tiers: wide base, central pillar, narrower cap. Uses vanilla stone textures so we ship without custom PNGs. (Internal block-id stays 'town_square' for save-file compatibility; visible name is 'Charter Stone'.)",
+  "parent": "minecraft:block/block",
   "textures": {
-    "bottom": "townfolk:block/town_square_bottom",
-    "side": "townfolk:block/town_square_side",
-    "top": "townfolk:block/town_square_top"
-  }
+    "stone": "minecraft:block/stone_bricks",
+    "chiseled": "minecraft:block/chiseled_stone_bricks",
+    "cap": "minecraft:block/polished_andesite",
+    "particle": "minecraft:block/stone_bricks"
+  },
+  "elements": [
+    {
+      "__note": "Foundation slab: 14x2x14 platform sitting on the bottom of the block",
+      "from": [1, 0, 1],
+      "to": [15, 2, 15],
+      "faces": {
+        "north": {"uv": [1, 14, 15, 16], "texture": "#stone"},
+        "east":  {"uv": [1, 14, 15, 16], "texture": "#stone"},
+        "south": {"uv": [1, 14, 15, 16], "texture": "#stone"},
+        "west":  {"uv": [1, 14, 15, 16], "texture": "#stone"},
+        "up":    {"uv": [1, 1, 15, 15], "texture": "#stone"},
+        "down":  {"uv": [1, 1, 15, 15], "texture": "#stone", "cullface": "down"}
+      }
+    },
+    {
+      "__note": "Central pillar: 10x12x10 — engraved chiseled-stone-brick on all sides to imply the town charter is inscribed",
+      "from": [3, 2, 3],
+      "to": [13, 14, 13],
+      "faces": {
+        "north": {"uv": [3, 2, 13, 14], "texture": "#chiseled"},
+        "east":  {"uv": [3, 2, 13, 14], "texture": "#chiseled"},
+        "south": {"uv": [3, 2, 13, 14], "texture": "#chiseled"},
+        "west":  {"uv": [3, 2, 13, 14], "texture": "#chiseled"},
+        "up":    {"uv": [3, 3, 13, 13], "texture": "#stone"},
+        "down":  {"uv": [3, 3, 13, 13], "texture": "#stone"}
+      }
+    },
+    {
+      "__note": "Cap stone: 12x2x12 polished-andesite coping. Slightly wider than the pillar so the silhouette reads as a finished monument.",
+      "from": [2, 14, 2],
+      "to": [14, 16, 14],
+      "faces": {
+        "north": {"uv": [2, 0, 14, 2], "texture": "#cap"},
+        "east":  {"uv": [2, 0, 14, 2], "texture": "#cap"},
+        "south": {"uv": [2, 0, 14, 2], "texture": "#cap"},
+        "west":  {"uv": [2, 0, 14, 2], "texture": "#cap"},
+        "up":    {"uv": [2, 2, 14, 14], "texture": "#cap"},
+        "down":  {"uv": [2, 2, 14, 14], "texture": "#stone"}
+      }
+    }
+  ]
 }

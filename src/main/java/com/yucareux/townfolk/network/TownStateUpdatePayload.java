@@ -65,6 +65,12 @@ public record TownStateUpdatePayload(
    /** Town prestige scalar [0, TownData.MAX_PRESTIGE]. Used by the
     *  Trade tab v1 placeholder and (Stage 3) by tier gating. */
    int prestige,
+   /** Active Home buildings in the level (Stage 10a). */
+   int homeCount,
+   /** True iff the town has a recognized Town Hall building (Charter
+    *  Stone enclosed with door + banner). Adds 4 to the population
+    *  cap when true. */
+   boolean hasTownHall,
    int idleCount,
    int workingCount,
    int sleepingCount,
@@ -398,6 +404,8 @@ public record TownStateUpdatePayload(
             buf.writeVarInt(p.populationTotal);
             buf.writeVarInt(p.tradePostCount);
             buf.writeVarInt(p.prestige);
+            buf.writeVarInt(p.homeCount);
+            buf.writeBoolean(p.hasTownHall);
             buf.writeVarInt(p.idleCount);
             buf.writeVarInt(p.workingCount);
             buf.writeVarInt(p.sleepingCount);
@@ -445,6 +453,8 @@ public record TownStateUpdatePayload(
             int popT = buf.readVarInt();
             int tradePosts = buf.readVarInt();
             int prestige = buf.readVarInt();
+            int homeCount = buf.readVarInt();
+            boolean hasTownHall = buf.readBoolean();
             int idle = buf.readVarInt();
             int work = buf.readVarInt();
             int slp  = buf.readVarInt();
@@ -454,6 +464,7 @@ public record TownStateUpdatePayload(
                villagers, townFacts, log, storage,
                agg, resLocs, targets, parcels, tradeOffers, treasury,
                popA, popT, tradePosts, prestige,
+               homeCount, hasTownHall,
                idle, work, slp, bToday, dToday);
          }
       );

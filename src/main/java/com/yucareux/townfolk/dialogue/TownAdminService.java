@@ -282,6 +282,26 @@ public final class TownAdminService {
 
    private static void spawn(ServerPlayer player, ServerLevel level,
                              TownSquareBlockEntity town, String name, String role, String personaSeed) {
+      // Population-cap gate (Stage 10a): you can't recruit more
+      // villagers than your town has Homes for (+4 if a Town Hall is
+      // recognized). Build more houses first.
+      int cap = com.yucareux.townfolk.building.PopulationCap.effectiveCap(level);
+      int alive = town.getTown().aliveVillagerCount();
+      if (alive >= cap) {
+         String hint = cap == 0
+            ? "No homes built yet — place a bed inside an enclosed room with a door first."
+            : "Population at cap (" + alive + " / " + cap + "). "
+              + "Build another Home"
+              + (com.yucareux.townfolk.building.PopulationCap.hasTownHall(level)
+                 ? "."
+                 : ", or enclose your Charter Stone into a Town Hall for +4 cap.");
+         player.sendSystemMessage(net.minecraft.network.chat.Component.literal(hint)
+            .withStyle(net.minecraft.ChatFormatting.YELLOW), false);
+         com.yucareux.townfolk.diag.VerboseLog.write("SPAWN_REJECT",
+            "town=" + town.getTown().townName()
+               + " alive=" + alive + " cap=" + cap, hint);
+         return;
+      }
       String seed = personaSeed == null ? "" : personaSeed.trim();
       // Empty role is fine now — the field has been removed from the UI. We
       // leave the protocol's role string in place for backwards compat.
@@ -726,6 +746,8 @@ public final class TownAdminService {
          data.villagers().size(),
          tradePostCount,
          data.prestige(),
+         com.yucareux.townfolk.building.PopulationCap.homeCount(level),
+         com.yucareux.townfolk.building.PopulationCap.hasTownHall(level),
          idleCountTally,
          workingCountTally,
          sleepingCountTally,

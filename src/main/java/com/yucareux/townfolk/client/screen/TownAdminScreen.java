@@ -1417,15 +1417,23 @@ public final class TownAdminScreen extends Screen {
       int innerR = paneR - UiTheme.PADDING;
 
       // Town status header — right-aligned under the pulse strip.
-      // Trade Post count + prestige are the new top-level scalars
-      // worth always-visible. Each Trade Post extends town coverage
-      // by 64 blocks; prestige unlocks higher trade tiers.
+      // Each block of scalars sits on its own line so the player can
+      // scan the three primary indicators (capacity, trade, prestige)
+      // at a glance without the line truncating.
       int tradePosts = this.state.tradePostCount();
       int prestige   = this.state.prestige();
-      String summary = "Trade Posts: " + tradePosts
-                     + "  ·  Prestige: " + prestige + " / "
-                     + com.yucareux.townfolk.town.TownData.MAX_PRESTIGE;
-      UiText.rightFaint(graphics, this.font, summary, innerR, top + OV_NAME_LABEL_Y - 14);
+      int homes      = this.state.homeCount();
+      boolean townHall = this.state.hasTownHall();
+      int popCap     = homes + (townHall ? 4 : 0);
+      int popAlive   = this.state.populationAlive();
+      String capLine = "Pop: " + popAlive + " / " + popCap
+                     + "  ·  Homes: " + homes
+                     + (townHall ? "  ·  ⛨ Town Hall (+4)" : "");
+      String tradeLine = "Trade Posts: " + tradePosts
+                       + "  ·  Prestige: " + prestige + " / "
+                       + com.yucareux.townfolk.town.TownData.MAX_PRESTIGE;
+      UiText.rightFaint(graphics, this.font, capLine,   innerR, top + OV_NAME_LABEL_Y - 24);
+      UiText.rightFaint(graphics, this.font, tradeLine, innerR, top + OV_NAME_LABEL_Y - 14);
 
       // Town name label sits just above the (already-placed) EditBox.
       UiText.muted(graphics, this.font, "Town name", innerL, top + OV_NAME_LABEL_Y);
