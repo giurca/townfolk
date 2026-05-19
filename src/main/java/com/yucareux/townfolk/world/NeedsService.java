@@ -155,6 +155,13 @@ public final class NeedsService {
    private static void maybeHail(ServerLevel level, TownSquareBlockEntity town,
                                  Villager v, VillagerEntry entry, LlmVillagerComponent comp) {
       if (VillagerBusy.isBusy(v.getUUID())) return;
+      // Don't yank sleeping villagers out of bed. Two guards: a phase
+      // check that suppresses hails after dusk and during night, and a
+      // direct isSleeping() check that catches even the edge case
+      // where the schedule says work_hours but the villager is still
+      // physically in bed (e.g. early dawn naps).
+      if (ScheduleService.isSleepTime(level)) return;
+      if (v.isSleeping()) return;
       if (comp.backstory() == null || comp.backstory().isBlank()) return;
       Long last = LAST_HAIL.get(v.getUUID());
       long now = level.getGameTime();

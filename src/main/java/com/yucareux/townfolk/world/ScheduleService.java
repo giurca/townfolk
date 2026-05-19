@@ -418,6 +418,14 @@ public final class ScheduleService {
       return "work_hours".equals(phaseOf(level.getDayTime() % 24000L));
    }
 
+   /** True during phases when villagers are expected to be heading
+    *  home or asleep. Used by services that drive active behaviour
+    *  (e.g. need-hailing) to avoid yanking villagers out of bed. */
+   public static boolean isSleepTime(net.minecraft.world.level.Level level) {
+      String p = phaseOf(level.getDayTime() % 24000L);
+      return "night".equals(p) || "dusk".equals(p);
+   }
+
    private static String phaseOf(long dayTime) {
       if (dayTime < 1000) return "dawn";
       if (dayTime < 9000) return "work_hours";
