@@ -1673,12 +1673,89 @@ public final class ParcelRoutine {
             "dest=" + dest.get().pos().toShortString());
          return true;
       }
+      // Fallback for mod-added crops/seeds we don't have an explicit
+      // DEPOSIT_RULE for (Immersive Engineering hemp, Farmer's Delight
+      // tomatoes, etc.). If the bag holds an item tagged as a crop or
+      // a seed, treat it as depositable with a default rule
+      // (keep=0, triggerAt=DEFAULT_CROP_TRIGGER) so it can never sit
+      // forever just because we didn't enumerate every modded item id.
+      for (var e : snap.totals().entrySet()) {
+         String itemId = e.getKey();
+         if (DEPOSIT_RULES.containsKey(itemId)) continue;     // explicit rule already handled above
+         int have = e.getValue();
+         if (have <= 0) continue;
+         net.minecraft.resources.ResourceLocation rl =
+            net.minecraft.resources.ResourceLocation.tryParse(itemId);
+         if (rl == null) continue;
+         Item it = BuiltInRegistries.ITEM.get(rl);
+         if (it == null) continue;
+         if (!isCropLike(it)) continue;
+         boolean triggerOk = ignoreTrigger || have >= DEFAULT_CROP_TRIGGER;
+         if (!triggerOk) {
+            trace.append(itemId).append("(have=").append(have)
+                 .append(", trigger=").append(DEFAULT_CROP_TRIGGER).append(",fallback) ");
+            continue;
+         }
+         var dest = com.yucareux.townfolk.town.TownTreasury.findNearestForDeposit(
+            ctx.level(), ctx.actor().blockPosition(), it);
+         if (dest.isEmpty()) {
+            VerboseLog.write("PARCEL_DEPOSIT_NO_DEST", "actor=" + ctx.entry().name()
+               + " item=" + itemId + " surplus=" + have + " fallback=crop-tag",
+               "no registered barrel accepts this item — writing [need:barrel_for_X] todo");
+            writeNeedBarrelMemory(ctx, itemId);
+            continue;
+         }
+         // ToolDispatcher's verb parser expects path-only ids
+         // ("hemp_seed") for vanilla, but for mod-namespaced items it
+         // can take the full id ("immersiveengineering:hemp_seed").
+         // Use the full id when the namespace isn't vanilla so the
+         // resolver doesn't fall through to "minecraft:hemp_seed".
+         String verbItem = "minecraft".equals(rl.getNamespace()) ? rl.getPath() : rl.toString();
+         ToolDispatcher.execute(ctx.level(), ctx.town(), ctx.actor(), ctx.entry(),
+            "deposit " + have + " " + verbItem);
+         VerboseLog.write("PARCEL_DEPOSIT", "actor=" + ctx.entry().name()
+            + " item=" + itemId + " count=" + have
+            + " fallback=crop-tag ignoreTrigger=" + ignoreTrigger,
+            "dest=" + dest.get().pos().toShortString());
+         return true;
+      }
+
       if (trace.length() > 0) {
          VerboseLog.write("PARCEL_DEPOSIT_SKIP", "actor=" + ctx.entry().name()
             + " ignoreTrigger=" + ignoreTrigger,
             "no item qualified: " + trace.toString().trim());
       }
       return false;
+   }
+
+   /** Default trigger for mod-added crop items that don't have an
+    *  explicit DEPOSIT_RULE entry. Same shape as the seed rules:
+    *  bank everything once we're carrying ~half a stack. */
+   private static final int DEFAULT_CROP_TRIGGER = 32;
+
+   /** Common-tag keys used by Forge/NeoForge's cross-mod item tag
+    *  convention. Mod crops typically register into these (Industrial
+    *  Engineering hemp uses {@code c:seeds/hemp} + {@code c:crops/hemp},
+    *  Farmer's Delight tomatoes use {@code c:crops/tomato}, etc.). We
+    *  match on the umbrella {@code c:crops} / {@code c:seeds} tags
+    *  rather than every per-crop sub-tag so this covers any future
+    *  mod that follows the convention without us adding code. */
+   private static final net.minecraft.tags.TagKey<Item> TAG_C_CROPS =
+      net.minecraft.tags.TagKey.create(
+         net.minecraft.core.registries.Registries.ITEM,
+         net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("c", "crops"));
+   private static final net.minecraft.tags.TagKey<Item> TAG_C_SEEDS =
+      net.minecraft.tags.TagKey.create(
+         net.minecraft.core.registries.Registries.ITEM,
+         net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("c", "seeds"));
+
+   /** True if {@code item} looks like a crop or seed by tag membership.
+    *  Used by the deposit-rule fallback so Klaus can bank Immersive
+    *  Engineering hemp / Farmer's Delight produce / any other mod
+    *  crop that follows the common-tag convention. */
+   private static boolean isCropLike(Item item) {
+      ItemStack probe = new ItemStack(item);
+      return probe.is(TAG_C_CROPS) || probe.is(TAG_C_SEEDS);
    }
 
    /** Minimum free slots the villager wants to keep available for incoming

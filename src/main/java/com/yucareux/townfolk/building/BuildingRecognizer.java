@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.DoorBlock;
@@ -228,8 +229,7 @@ public final class BuildingRecognizer {
     *  they're the seam between inside and outside, both states. */
    public static boolean isPassable(BlockGetter level, BlockPos pos) {
       BlockState s = level.getBlockState(pos);
-      Block b = s.getBlock();
-      if (b instanceof DoorBlock || b instanceof TrapDoorBlock) return false;
+      if (isDoorLike(s) || isTrapdoorLike(s)) return false;
       if (s.isAir()) return true;
       if (s.canBeReplaced()) return true;
       // Fluid sources (water/lava): treat as passable so fountains
@@ -240,9 +240,28 @@ public final class BuildingRecognizer {
 
    private static boolean hasDoorIn(BlockGetter level, Set<BlockPos> boundary) {
       for (BlockPos p : boundary) {
-         if (level.getBlockState(p).getBlock() instanceof DoorBlock) return true;
+         if (isDoorLike(level.getBlockState(p))) return true;
       }
       return false;
+   }
+
+   /** Match vanilla doors (DoorBlock instanceof) AND mod-added doors
+    *  that don't extend DoorBlock but DO belong to the vanilla
+    *  {@code #minecraft:doors} block tag — e.g. Dramatic Doors'
+    *  LargeDoorBlock. Tag membership is the standard contract mods
+    *  use to declare "this acts like a door." */
+   private static boolean isDoorLike(BlockState s) {
+      Block b = s.getBlock();
+      if (b instanceof DoorBlock) return true;
+      return s.is(BlockTags.DOORS);
+   }
+
+   /** Same logic for trapdoors — match instanceof OR the
+    *  {@code #minecraft:trapdoors} tag so mod trapdoors count too. */
+   private static boolean isTrapdoorLike(BlockState s) {
+      Block b = s.getBlock();
+      if (b instanceof TrapDoorBlock) return true;
+      return s.is(BlockTags.TRAPDOORS);
    }
 
    /** Look for an air block adjacent to the marker on each of the 6
