@@ -661,7 +661,10 @@ public final class TownAdminScreen extends Screen {
    private static final int TASK_CELL_W = 110;
    private static final int TASK_CELL_H = 72;
    private static final int TASK_CELL_GAP = 8;
-   private static final int TASK_GRID_TOP = 20;
+   /** Standardised across grid-style tabs (Resources / Parcels / Trade /
+    *  Tasks) so the visual rhythm — header on one line, generous gap,
+    *  then grid — stays consistent. */
+   private static final int TASK_GRID_TOP = 26;
 
    /** Cached fallback icon for tasks that don't parse to a known need. */
    private net.minecraft.world.item.ItemStack taskFallbackIcon;
@@ -672,11 +675,14 @@ public final class TownAdminScreen extends Screen {
       int innerR = paneR - PADDING;
 
       List<TaskRow> rows = collectOpenTasks();
-      String header = "Open tasks across the town (" + rows.size() + ")";
-      graphics.drawString(this.font, header, innerL, top, FG_DIM, true);
+      int contentTop = top + 10;
+      UiText.heading(graphics, this.font,
+         "Open tasks across the town (" + rows.size() + ")",
+         innerL, contentTop);
       if (rows.isEmpty()) {
-         graphics.drawString(this.font, "(no open commitments — nobody owes anybody anything)",
-            innerL, top + 14, FG_FAINT, true);
+         UiText.faint(graphics, this.font,
+            "(no open commitments — nobody owes anybody anything)",
+            innerL, contentTop + 14);
          return;
       }
 
@@ -3061,14 +3067,18 @@ public final class TownAdminScreen extends Screen {
    private void renderLogTab(GuiGraphics graphics, int paneL, int paneR, int top, int bottom) {
       int innerL = paneL + PADDING;
       int innerR = paneR - PADDING;
-      graphics.drawString(this.font, "Activity log (latest first)", innerL, top, FG_DIM, true);
+      int contentTop = top + 10;
+      UiText.heading(graphics, this.font, "Activity log (latest first)", innerL, contentTop);
       List<TownStateUpdatePayload.LogEntry> entries = this.state.log();
+      UiText.rightFaint(graphics, this.font,
+         entries.size() + " entries", innerR, contentTop);
       if (entries.isEmpty()) {
-         graphics.drawString(this.font, "(no activity yet — exchanges, dialogue, compaction will appear here)",
-            innerL, top + 14, FG_FAINT, true);
+         UiText.faint(graphics, this.font,
+            "(no activity yet — exchanges, dialogue, compaction will appear here)",
+            innerL, contentTop + 14);
          return;
       }
-      int y = top + 14;
+      int y = contentTop + 16;
       int maxBottom = bottom - 4;
       for (int i = entries.size() - 1; i >= 0; i--) {
          if (y > maxBottom) break;

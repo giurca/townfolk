@@ -5,7 +5,6 @@ import com.yucareux.townfolk.town.StorageFilterMode;
 import com.yucareux.townfolk.world.inventory.StorageConfigMenu;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
@@ -49,7 +48,6 @@ public final class StorageConfigScreen extends AbstractContainerScreen<StorageCo
    private static final int FG_ACCENT    = 0xFFFFD27A;
    private static final int FG_DIM       = 0xFFB89B70;
 
-   private Button toggleModeBtn;
    private EditBox labelBox;
    /** Last label value we sent to the server — used to coalesce edits so
     *  we don't fire a packet per keystroke. */
@@ -73,13 +71,12 @@ public final class StorageConfigScreen extends AbstractContainerScreen<StorageCo
    @Override
    protected void init() {
       super.init();
-      int hdr = StorageConfigMenu.HEADER_BAND_PX;
 
-      // Optional label EditBox in the header band. Width spans the
-      // panel minus the side padding; height = 14 fits the band.
+      // Optional label EditBox in the header band. Narrower than before
+      // so the custom-drawn mode chip fits to its right on the same row.
       this.labelBox = new EditBox(this.font,
          this.leftPos + 8, this.topPos + 18,
-         this.imageWidth - 16, 14,
+         this.imageWidth - 16 - MODE_CHIP_W - 6, 14,
          Component.literal("barrel label"));
       this.labelBox.setMaxLength(64);
       this.labelBox.setHint(Component.literal("optional — name this barrel"));
@@ -89,27 +86,22 @@ public final class StorageConfigScreen extends AbstractContainerScreen<StorageCo
       this.labelBox.setValue(existingLabel);
       this.lastSentLabel = existingLabel;
       this.addRenderableWidget(this.labelBox);
-
-      // Toggle button sits in the gap between filter region and
-      // inventory label, shifted down by the header band.
-      this.toggleModeBtn = Button.builder(
-            Component.literal(modeLabel()),
-            b -> onToggleMode())
-         .bounds(this.leftPos + 96, this.topPos + 62 + hdr, 72, 14)
-         .build();
-      this.addRenderableWidget(this.toggleModeBtn);
+      // No vanilla toggle Button widget — the mode toggle is now a
+      // custom-drawn chip (see renderModeChip + mouseClicked), matching
+      // the Trade-popup gold-standard button language.
    }
+
+   /** Mode-toggle chip geometry. Drawn instead of using a vanilla
+    *  Button widget so the visual language matches the Trade-popup
+    *  modals elsewhere in the admin UI. */
+   private static final int MODE_CHIP_W = 84;
+   private static final int MODE_CHIP_H = 14;
 
    /** Current label, pre-filled from the {@link StorageConfigMenu#initialLabel()}
     *  seeded server-side when the menu opened. Falls back to "" if the
     *  container has no existing config. */
    private String currentLabel() {
       return this.menu.initialLabel();
-   }
-
-   private String modeLabel() {
-      return this.menu.mode() == StorageFilterMode.WHITELIST
-         ? "✓ Whitelist" : "✗ Blacklist";
    }
 
    private void onToggleMode() {
@@ -153,18 +145,12 @@ public final class StorageConfigScreen extends AbstractContainerScreen<StorageCo
 
    @Override
    protected void renderLabels(GuiGraphics g, int mouseX, int mouseY) {
-      // Title — single line. The old subtitle ("Whitelist · 6/16 items")
-      // is gone because the label EditBox sits in the same band; that
-      // info is conveyed via the toggle button text + the filled slot
-      // count rendered to the right of the title.
+      // Title — left side of the header row. Filter-count is now a
+      // subtitle under the title (cleaner than competing with the
+      // toggle chip for the right edge of the header).
       g.drawString(this.font,
          Component.literal("Configure storage").withStyle(ChatFormatting.GOLD),
          8, this.titleLabelY, FG_ACCENT, true);
-      int filled = countFilledFilterSlots();
-      String count = filled + "/" + com.yucareux.townfolk.town.StorageConfig.FILTER_SLOTS + " filters";
-      int countW = this.font.width(count);
-      g.drawString(this.font, count,
-         this.imageWidth - 8 - countW, this.titleLabelY, FG_DIM, true);
 
       // Inventory label.
       g.drawString(this.font,
@@ -174,16 +160,73 @@ public final class StorageConfigScreen extends AbstractContainerScreen<StorageCo
 
    @Override
    public void render(GuiGraphics g, int mouseX, int mouseY, float partialTicks) {
-      // Refresh the toggle button label every frame so the DataSlot
-      // sync that flips menu.mode() server→client is reflected
-      // immediately. Otherwise the button text stays stale until the
-      // player clicks it again.
-      if (this.toggleModeBtn != null) {
-         this.toggleModeBtn.setMessage(Component.literal(modeLabel()));
-      }
-
       super.render(g, mouseX, mouseY, partialTicks);
+
+      // Mode chip — drawn AFTER super.render so it sits on top of the
+      // panel's slot grid background, but BEFORE the tooltip so hover
+      // tooltips on inventory slots still work as expected.
+      drawModeChip(g, mouseX, mouseY);
+
       this.renderTooltip(g, mouseX, mouseY);
+   }
+
+   /** Render the custom mode-toggle chip. Geometry matches
+    *  {@link #modeChipBounds()}; visual language matches the Trade-
+    *  popup buttons (green = primary action, neutral = secondary). */
+   private void drawModeChip(GuiGraphics g, int mouseX, int mouseY) {
+      int[] b = modeChipBounds();
+      int x = b[0], y = b[1], w = b[2], h = b[3];
+      boolean isWhite = this.menu.mode() == StorageFilterMode.WHITELIST;
+      boolean hovered = mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
+      int bg     = isWhite ? 0xFF3C5A22 : 0xFF6B2A2A;     // green / red
+      int border = isWhite ? 0xFF6FA445 : 0xFFB85C5C;
+      int fg     = isWhite ? 0xFFE8FFD2 : 0xFFFFD8D8;
+      if (hovered) bg = brighten(bg);
+      g.fill(x, y, x + w, y + h, bg);
+      g.fill(x, y + h, x + w, y + h + 1, border);
+      String label = isWhite ? "Whitelist mode" : "Blacklist mode";
+      int lw = this.font.width(label);
+      g.drawString(this.font, label, x + (w - lw) / 2, y + 3, fg, true);
+
+      // Filter count — small line under the chip, right-aligned so it
+      // mirrors the chip's edge and stays out of the EditBox row.
+      int filled = countFilledFilterSlots();
+      String count = filled + "/"
+         + com.yucareux.townfolk.town.StorageConfig.FILTER_SLOTS + " filters";
+      int cw = this.font.width(count);
+      g.drawString(this.font, count, x + w - cw, y + h + 4, FG_DIM, true);
+   }
+
+   /** Bounds of the mode-toggle chip in screen-space coords (post
+    *  {@code leftPos / topPos} application). Single source of truth so
+    *  draw + hit-test agree. */
+   private int[] modeChipBounds() {
+      int x = this.leftPos + this.imageWidth - MODE_CHIP_W - 8;
+      int y = this.topPos + 18;
+      return new int[]{x, y, MODE_CHIP_W, MODE_CHIP_H};
+   }
+
+   private static int brighten(int argb) {
+      int a = (argb >>> 24) & 0xFF;
+      int r = Math.min(255, ((argb >>> 16) & 0xFF) + 24);
+      int gC= Math.min(255, ((argb >>> 8) & 0xFF) + 24);
+      int b = Math.min(255, (argb & 0xFF) + 24);
+      return (a << 24) | (r << 16) | (gC << 8) | b;
+   }
+
+   @Override
+   public boolean mouseClicked(double mouseX, double mouseY, int button) {
+      // Mode chip hit-test BEFORE super so the slot under it doesn't
+      // eat the click. The chip never overlaps real slots (it lives in
+      // the header band above the filter grid), but defence in depth.
+      int[] b = modeChipBounds();
+      if (button == 0
+          && mouseX >= b[0] && mouseX < b[0] + b[2]
+          && mouseY >= b[1] && mouseY < b[1] + b[3]) {
+         onToggleMode();
+         return true;
+      }
+      return super.mouseClicked(mouseX, mouseY, button);
    }
 
    /** True 20Hz cadence (AbstractContainerScreen routes game ticks here)
