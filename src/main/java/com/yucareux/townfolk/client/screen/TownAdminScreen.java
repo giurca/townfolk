@@ -110,7 +110,11 @@ public final class TownAdminScreen extends Screen {
     *  mouse wheel; clamped at render time once the row count is known. */
    private int resourcesGridScrollRows = 0;
    private UiList<TownStateUpdatePayload.ResourceLoc> resourcesDrillList;
-   private UiList<TownStateUpdatePayload.ParcelSummary> parcelsList;
+   /** Scroll offset (rows) for the Parcels grid. */
+   private int parcelsGridScrollRows = 0;
+
+   /** Selected parcel id (popup detail open). Null = no popup. */
+   private String selectedParcelId = null;
    /** When set, the Resources tab renders a floating popup listing every
     *  barrel that holds this item. */
    private String selectedResourceItem;
@@ -1092,21 +1096,43 @@ public final class TownAdminScreen extends Screen {
                return true;
             }
          }
-         if (this.tab == Tab.PARCELS && this.parcelsList != null) {
-            // Click a parcel row → ask the server to open the appropriate
-            // editor: crop-plan for PLANT, animal-plan for ANIMAL.
-            var hit = this.parcelsList.itemAt(mouseX, mouseY);
-            if (hit != null && "PLANT".equals(hit.type())) {
-               PacketDistributor.sendToServer(
-                  AdminActionPayload.openParcelEditor(townPos(), hit.id()));
+         if (this.tab == Tab.PARCELS) {
+            int paneB2 = paneT + panelHeight();
+            int paneR2 = paneL + panelWidth();
+            int contentTop = paneT + 22 + 16;
+            int contentBottom = paneB2 - PADDING;
+
+            // Popup open → button hit-test first, else outside-click closes.
+            if (this.selectedParcelId != null) {
+               String btn = hitTestParcelPopupButton(mouseX, mouseY, paneL, paneR2,
+                  contentTop, contentBottom);
+               var p = findParcel(this.selectedParcelId);
+               if ("open".equals(btn) && p != null) {
+                  if ("PLANT".equals(p.type())) {
+                     PacketDistributor.sendToServer(
+                        AdminActionPayload.openParcelEditor(townPos(), p.id()));
+                  } else {
+                     PacketDistributor.sendToServer(
+                        AdminActionPayload.openAnimalPlan(townPos(), p.id()));
+                  }
+                  this.selectedParcelId = null;
+                  return true;
+               }
+               if ("close".equals(btn)) {
+                  this.selectedParcelId = null;
+                  return true;
+               }
+               // Click outside popup closes.
+               this.selectedParcelId = null;
                return true;
             }
-            if (hit != null && "ANIMAL".equals(hit.type())) {
-               PacketDistributor.sendToServer(
-                  AdminActionPayload.openAnimalPlan(townPos(), hit.id()));
+
+            // No popup → grid hit-test.
+            var hit = parcelAtPoint(mouseX, mouseY);
+            if (hit != null) {
+               this.selectedParcelId = hit.id();
                return true;
             }
-            if (hit != null) return true;
          }
          if (this.tab == Tab.TRADE) {
             int paneR = panelRight();
@@ -1186,8 +1212,22 @@ public final class TownAdminScreen extends Screen {
             }
          }
       }
-      if (this.mode == Mode.NORMAL && this.tab == Tab.PARCELS && this.parcelsList != null
-          && this.parcelsList.onMouseScrolled(mouseX, mouseY, scrollY)) return true;
+      if (this.mode == Mode.NORMAL && this.tab == Tab.PARCELS && this.selectedParcelId == null) {
+         int paneL = panelLeft();
+         int paneR = panelRight();
+         int top   = panelTop() + 34;
+         int bottom = panelBottom() - PADDING;
+         int innerL = paneL + UiTheme.PADDING;
+         int innerR = paneR - UiTheme.PADDING;
+         int gridTop = top + PARCEL_GRID_TOP;
+         int gridBot = bottom - 6;
+         if (mouseX >= innerL && mouseX <= innerR
+             && mouseY >= gridTop && mouseY <= gridBot) {
+            this.parcelsGridScrollRows = Math.max(0,
+               this.parcelsGridScrollRows - (int) Math.signum(scrollY));
+            return true;
+         }
+      }
       if (this.mode == Mode.NORMAL && this.tab == Tab.TRADE && this.selectedTradeOfferId == null) {
          int paneL = panelLeft();
          int paneR = panelRight();
@@ -2020,63 +2060,268 @@ public final class TownAdminScreen extends Screen {
       int innerR = paneR - UiTheme.PADDING;
       int contentTop = top + 10;
 
+      // Header row: count summary on the left, right-aligned hint on the right.
       UiText.heading(graphics, this.font,
          "Owned land: " + this.state.parcels().size() + " parcels",
          innerL, contentTop);
+      int plant = 0, animal = 0;
+      for (var p : this.state.parcels()) {
+         if ("PLANT".equals(p.type())) plant++; else if ("ANIMAL".equals(p.type())) animal++;
+      }
       UiText.rightFaint(graphics, this.font,
-         "type · size · content snapshot",
+         plant + " plant · " + animal + " animal",
          innerR, contentTop);
 
-      int listTop = contentTop + 16;
-      int listBottom = bottom - 6;
-      if (this.state.parcels().isEmpty()) {
+      int gridTop = top + PARCEL_GRID_TOP;
+      int gridBot = bottom - 6;
+      var parcels = this.state.parcels();
+      if (parcels.isEmpty()) {
          UiText.faint(graphics, this.font,
             "no parcels yet — give a villager a Surveyor's Stake and mark some land",
-            innerL, listTop + 10);
+            innerL, gridTop + 10);
          return;
       }
-      if (this.parcelsList == null) {
-         this.parcelsList = new UiList<>(innerL, listTop, innerR - innerL,
-            listBottom - listTop, 30, this::renderParcelRow);
-      } else {
-         this.parcelsList.setBounds(innerL, listTop, innerR - innerL, listBottom - listTop);
+
+      int gridW = innerR - innerL;
+      int cols  = Math.max(1, (gridW + PARCEL_CELL_GAP) / (PARCEL_CELL_W + PARCEL_CELL_GAP));
+      int gridUsed = cols * PARCEL_CELL_W + (cols - 1) * PARCEL_CELL_GAP;
+      int gridX0   = innerL + (gridW - gridUsed) / 2;
+
+      int totalRows = (parcels.size() + cols - 1) / cols;
+      int visibleRows = Math.max(1, (gridBot - gridTop + PARCEL_CELL_GAP) / (PARCEL_CELL_H + PARCEL_CELL_GAP));
+      int maxScrollRow = Math.max(0, totalRows - visibleRows);
+      if (this.parcelsGridScrollRows > maxScrollRow) this.parcelsGridScrollRows = maxScrollRow;
+      int scrollPx = this.parcelsGridScrollRows * (PARCEL_CELL_H + PARCEL_CELL_GAP);
+
+      scaledScissor(graphics, innerL, gridTop, innerR, gridBot);
+      int i = 0;
+      for (var p : parcels) {
+         int row = i / cols;
+         int col = i % cols;
+         int cx = gridX0 + col * (PARCEL_CELL_W + PARCEL_CELL_GAP);
+         int cy = gridTop + row * (PARCEL_CELL_H + PARCEL_CELL_GAP) - scrollPx;
+         if (cy > gridBot) break;
+         if (cy + PARCEL_CELL_H < gridTop) { i++; continue; }
+         renderParcelCell(graphics, p, cx, cy, mouseX, mouseY);
+         i++;
       }
-      this.parcelsList.setItems(this.state.parcels());
-      this.parcelsList.render(graphics, mouseX, mouseY);
+      graphics.disableScissor();
+
+      if (this.selectedParcelId != null) {
+         renderParcelPopup(graphics, paneL, paneR, top, bottom);
+      }
    }
 
-   private void renderParcelRow(UiList.Row<TownStateUpdatePayload.ParcelSummary> row) {
-      var p = row.item();
-      var g = row.g();
-      int x = row.x(), y = row.y(), w = row.w();
-      net.minecraft.core.BlockPos centre = net.minecraft.core.BlockPos.of(p.centerPos());
-      String headline = p.ownerName() + " · " + p.type() + " · "
-         + p.sizeX() + "×" + p.sizeZ() + " @ " + centre.toShortString();
-      UiText.heading(g, this.font, headline, x + 6, y + 4);
+   private static final int PARCEL_CELL_W = 96;
+   private static final int PARCEL_CELL_H = 72;
+   private static final int PARCEL_CELL_GAP = 8;
+   private static final int PARCEL_GRID_TOP = 26;
 
-      StringBuilder content = new StringBuilder();
+   /** Stable per-type icon for the parcel grid: wheat for PLANT,
+    *  cow spawn egg for ANIMAL. Built lazily on first render. */
+   private net.minecraft.world.item.ItemStack parcelPlantIcon;
+   private net.minecraft.world.item.ItemStack parcelAnimalIcon;
+
+   private void renderParcelCell(GuiGraphics g,
+                                  TownStateUpdatePayload.ParcelSummary p,
+                                  int x, int y, int mouseX, int mouseY) {
+      boolean hovered = mouseX >= x && mouseX < x + PARCEL_CELL_W
+                     && mouseY >= y && mouseY < y + PARCEL_CELL_H;
+      boolean selected = p.id().equals(this.selectedParcelId);
+      int bg = (hovered || selected) ? TAB_ACTIVE_BG : ROW_BG;
+      g.fill(x, y, x + PARCEL_CELL_W, y + PARCEL_CELL_H, bg);
+      g.fill(x, y + PARCEL_CELL_H, x + PARCEL_CELL_W, y + PARCEL_CELL_H + 1, PANEL_BORDER);
+
+      // Top-left: type chip.
+      boolean isPlant = "PLANT".equals(p.type());
+      String typeTag = isPlant ? "PLANT" : "ANIMAL";
+      int typeColor = isPlant ? 0xFF6FA445 : 0xFFD2966B;
+      g.drawString(this.font, typeTag, x + 4, y + 3, typeColor, true);
+
+      // Top-right: size badge.
+      String size = p.sizeX() + "×" + p.sizeZ();
+      int sw = this.font.width(size);
+      g.drawString(this.font, size, x + PARCEL_CELL_W - sw - 4, y + 3, FG_DIM, true);
+
+      // Icon, centred.
+      if (isPlant) {
+         if (this.parcelPlantIcon == null) {
+            this.parcelPlantIcon = new net.minecraft.world.item.ItemStack(
+               net.minecraft.world.item.Items.WHEAT);
+         }
+         g.renderItem(this.parcelPlantIcon, x + (PARCEL_CELL_W - 16) / 2, y + 14);
+      } else {
+         if (this.parcelAnimalIcon == null) {
+            this.parcelAnimalIcon = new net.minecraft.world.item.ItemStack(
+               net.minecraft.world.item.Items.COW_SPAWN_EGG);
+         }
+         g.renderItem(this.parcelAnimalIcon, x + (PARCEL_CELL_W - 16) / 2, y + 14);
+      }
+
+      // Owner name centred under icon.
+      String ownerClip = UiText.truncate(this.font, p.ownerName(), PARCEL_CELL_W - 6);
+      int ow = this.font.width(ownerClip);
+      g.drawString(this.font, ownerClip,
+         x + (PARCEL_CELL_W - ow) / 2, y + 34, UiTheme.BODY, true);
+
+      // Content snapshot, faint, centred + truncated.
+      String snapshot = parcelSnapshotText(p);
+      String snapClip = UiText.truncate(this.font, snapshot, PARCEL_CELL_W - 6);
+      int snw = this.font.width(snapClip);
+      g.drawString(this.font, snapClip,
+         x + (PARCEL_CELL_W - snw) / 2, y + 46, UiTheme.FAINT, true);
+
+      // Position right-aligned bottom — a 3-coord hint for the player.
+      net.minecraft.core.BlockPos centre = net.minecraft.core.BlockPos.of(p.centerPos());
+      String pos = centre.getX() + " · " + centre.getY() + " · " + centre.getZ();
+      String posClip = UiText.truncate(this.font, pos, PARCEL_CELL_W - 6);
+      int pw = this.font.width(posClip);
+      g.drawString(this.font, posClip,
+         x + (PARCEL_CELL_W - pw) / 2, y + 58, UiTheme.FAINT, true);
+   }
+
+   /** Build the human-readable content snapshot for a parcel — same
+    *  string the popup uses, abbreviated by truncation when tile-bound. */
+   private static String parcelSnapshotText(TownStateUpdatePayload.ParcelSummary p) {
+      StringBuilder sb = new StringBuilder();
       if ("PLANT".equals(p.type())) {
-         if (p.ripeCrops() > 0)     content.append(p.ripeCrops()).append(" ripe");
+         if (p.ripeCrops() > 0)     sb.append(p.ripeCrops()).append(" ripe");
          if (p.emptyFarmland() > 0) {
-            if (content.length() > 0) content.append(", ");
-            content.append(p.emptyFarmland()).append(" empty farmland");
+            if (sb.length() > 0) sb.append(", ");
+            sb.append(p.emptyFarmland()).append(" empty");
          }
          if (p.tillableTiles() > 0) {
-            if (content.length() > 0) content.append(", ");
-            content.append(p.tillableTiles()).append(" tillable");
+            if (sb.length() > 0) sb.append(", ");
+            sb.append(p.tillableTiles()).append(" tillable");
          }
-         if (content.length() == 0) content.append("clear");
+         if (sb.length() == 0) sb.append("clear");
       } else {
-         // ANIMAL — show species count + maturity. unshornSheep folded in.
-         if (p.animalCount() == 0) {
-            content.append("no animals");
-         } else {
-            content.append(p.animalCount()).append(" animals");
-            if (p.animalBabies() > 0) content.append(" (").append(p.animalBabies()).append(" baby)");
-            if (p.unshornSheep() > 0) content.append(", ").append(p.unshornSheep()).append(" unshorn");
+         if (p.animalCount() == 0) sb.append("no animals");
+         else {
+            sb.append(p.animalCount()).append(" animals");
+            if (p.animalBabies() > 0) sb.append(" (").append(p.animalBabies()).append(" baby)");
+            if (p.unshornSheep() > 0) sb.append(", ").append(p.unshornSheep()).append(" unshorn");
          }
       }
-      UiText.faint(g, this.font, content.toString(), x + 6, y + 16);
+      return sb.toString();
+   }
+
+   private TownStateUpdatePayload.ParcelSummary findParcel(String id) {
+      if (id == null) return null;
+      for (var p : this.state.parcels()) if (id.equals(p.id())) return p;
+      return null;
+   }
+
+   /** Grid hit-test for the Parcels tab. Mirrors the cell rects laid
+    *  out in {@link #renderParcelsBody}. */
+   private TownStateUpdatePayload.ParcelSummary parcelAtPoint(double mouseX, double mouseY) {
+      int paneL = panelLeft();
+      int paneR = panelRight();
+      int top   = panelTop() + 34;
+      int bottom = panelBottom() - PADDING;
+      int innerL = paneL + UiTheme.PADDING;
+      int innerR = paneR - UiTheme.PADDING;
+      int gridTop = top + PARCEL_GRID_TOP;
+      int gridBot = bottom - 6;
+      if (mouseX < innerL || mouseX > innerR || mouseY < gridTop || mouseY > gridBot) return null;
+
+      var parcels = this.state.parcels();
+      if (parcels.isEmpty()) return null;
+      int gridW = innerR - innerL;
+      int cols  = Math.max(1, (gridW + PARCEL_CELL_GAP) / (PARCEL_CELL_W + PARCEL_CELL_GAP));
+      int gridUsed = cols * PARCEL_CELL_W + (cols - 1) * PARCEL_CELL_GAP;
+      int gridX0   = innerL + (gridW - gridUsed) / 2;
+      int scrollPx = this.parcelsGridScrollRows * (PARCEL_CELL_H + PARCEL_CELL_GAP);
+      for (int i = 0; i < parcels.size(); i++) {
+         int row = i / cols;
+         int col = i % cols;
+         int cx = gridX0 + col * (PARCEL_CELL_W + PARCEL_CELL_GAP);
+         int cy = gridTop + row * (PARCEL_CELL_H + PARCEL_CELL_GAP) - scrollPx;
+         if (mouseX >= cx && mouseX < cx + PARCEL_CELL_W
+             && mouseY >= cy && mouseY < cy + PARCEL_CELL_H) {
+            return parcels.get(i);
+         }
+      }
+      return null;
+   }
+
+   /** Parcel detail popup — same shape as the Trade-offer popup
+    *  (modal gold standard). Title row, content lines, button row at
+    *  the bottom. Buttons: green "Open plan" → fires the existing
+    *  openParcelEditor/openAnimalPlan verb; dark "Close" → dismiss. */
+   private void renderParcelPopup(GuiGraphics g, int paneL, int paneR, int top, int bottom) {
+      var p = findParcel(this.selectedParcelId);
+      if (p == null) { this.selectedParcelId = null; return; }
+
+      int innerL = paneL + UiTheme.PADDING;
+      int innerR = paneR - UiTheme.PADDING;
+      int popW = Math.min(360, innerR - innerL - 40);
+      int popH = 170;
+      int popX = (innerL + innerR - popW) / 2;
+      int popY = (top + bottom - popH) / 2;
+
+      // Backdrop + frame.
+      g.fill(paneL, top, paneR, bottom, 0xC0000000);
+      g.fill(popX, popY, popX + popW, popY + popH, PANEL_BG);
+      g.fill(popX - 1, popY - 1, popX + popW + 1, popY, PANEL_BORDER);
+      g.fill(popX - 1, popY + popH, popX + popW + 1, popY + popH + 1, PANEL_BORDER);
+      g.fill(popX - 1, popY, popX, popY + popH, PANEL_BORDER);
+      g.fill(popX + popW, popY, popX + popW + 1, popY + popH, PANEL_BORDER);
+
+      int x = popX + 14;
+      int y = popY + 12;
+
+      UiText.heading(g, this.font,
+         p.ownerName() + "'s " + p.type().toLowerCase(java.util.Locale.ROOT)
+            + " parcel — " + p.sizeX() + "×" + p.sizeZ(),
+         x, y);
+      y += 14;
+
+      // Icon + content snapshot row.
+      var icon = "PLANT".equals(p.type()) ? this.parcelPlantIcon : this.parcelAnimalIcon;
+      if (icon != null) g.renderItem(icon, x, y);
+      g.drawString(this.font, parcelSnapshotText(p),
+         x + 22, y + 4, FG_PRIMARY, true);
+      y += 24;
+
+      // Position.
+      net.minecraft.core.BlockPos centre = net.minecraft.core.BlockPos.of(p.centerPos());
+      g.drawString(this.font, "Centre: " + centre.toShortString(), x, y, FG_ACCENT, true);
+      y += 12;
+
+      // Created day.
+      g.drawString(this.font, "Marked on day " + p.createdDay(), x, y, FG_DIM, true);
+      y += 14;
+
+      // Hint line.
+      String hint = "PLANT".equals(p.type())
+         ? "Open plan to edit the crop schedule."
+         : "Open plan to edit breed/harvest targets.";
+      g.drawString(this.font, hint, x, y, FG_FAINT, true);
+
+      // Buttons.
+      int btnY = popY + popH - 24;
+      drawTradeButton(g, popX + 14, btnY, 110, "Open plan", true);
+      drawTradeButton(g, popX + popW - 14 - 80, btnY, 80, "Close", false);
+   }
+
+   /** Hit-test for the parcel popup's buttons. Returns "open",
+    *  "close", or null. Coords are LOGICAL. */
+   private String hitTestParcelPopupButton(double mouseX, double mouseY,
+                                            int paneL, int paneR, int top, int bottom) {
+      int innerL = paneL + UiTheme.PADDING;
+      int innerR = paneR - UiTheme.PADDING;
+      int popW = Math.min(360, innerR - innerL - 40);
+      int popH = 170;
+      int popX = (innerL + innerR - popW) / 2;
+      int popY = (top + bottom - popH) / 2;
+      int btnY = popY + popH - 24;
+      if (mouseY < btnY || mouseY >= btnY + 18) return null;
+      int openX = popX + 14;
+      if (mouseX >= openX && mouseX < openX + 110) return "open";
+      int closeX = popX + popW - 14 - 80;
+      if (mouseX >= closeX && mouseX < closeX + 80) return "close";
+      return null;
    }
 
    private void renderVillagersTab(GuiGraphics graphics, int paneL, int paneR,
