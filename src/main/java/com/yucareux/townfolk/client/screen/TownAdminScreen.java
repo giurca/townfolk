@@ -162,9 +162,9 @@ public final class TownAdminScreen extends Screen {
    private int scrollOffset;
    private int memoryScrollOffset;
    private int beliefsScrollOffset;
-   private int tasksScrollOffset;
-
-   /** Grid scroll for the Tasks tab (rows). */
+   /** Grid scroll for the Tasks tab (rows). Replaces the old
+    *  list-pixel tasksScrollOffset field that became dead when the
+    *  Tasks tab moved from list rows to grid tiles. */
    private int tasksGridScrollRows = 0;
 
    /** Selected (owner-uuid, todo-id) for the popup. Encoded as

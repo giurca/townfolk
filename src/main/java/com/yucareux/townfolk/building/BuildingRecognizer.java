@@ -274,9 +274,27 @@ public final class BuildingRecognizer {
       if (s.is(BlockTags.DOORS)) return true;
       if (s.hasProperty(BlockStateProperties.OPEN)) {
          var rl = BuiltInRegistries.BLOCK.getKey(b);
-         if (rl != null && rl.getPath().contains("door")) return true;
+         if (rl != null && pathLooksLikeDoor(rl.getPath())) return true;
       }
       return false;
+   }
+
+   /** True if the registry path looks like a real door rather than
+    *  something that happens to contain "door" (e.g. "doorbell",
+    *  "doorframe"). Accept ending in {@code _door}, equalling
+    *  {@code door}, or starting with {@code door_} (catches
+    *  Dramatic Doors' {@code short_oak_door} and {@code tall_oak_door}
+    *  pattern as well as any future {@code door_X} convention). */
+   private static boolean pathLooksLikeDoor(String path) {
+      if (path == null || path.isEmpty()) return false;
+      if (path.equals("door")) return true;
+      if (path.endsWith("_door")) return true;
+      if (path.startsWith("door_")) return true;
+      // Dramatic Doors uses short_<wood>_door / tall_<wood>_door —
+      // already matches "_door" suffix above. Add a contains check
+      // anchored on "_door_" or "_door" to catch oddball patterns
+      // like "iron_door_block" without matching "doorbell".
+      return path.contains("_door_");
    }
 
    /** Same logic for trapdoors — match instanceof OR the
