@@ -69,9 +69,22 @@ public class DoorInteractionGoal extends Goal {
    private final java.util.Map<BlockPos, net.minecraft.world.phys.Vec3> mustWalkPast
       = new java.util.HashMap<>();
 
-   /** Look this far ahead on the path. 2 nodes ≈ one tick of margin at
-    *  villager walking speed before reaching the obstacle. */
+   /** Look this far ahead on the path for DOORS. 2 nodes ≈ one tick of
+    *  margin at villager walking speed before reaching the obstacle. */
    private static final int LOOKAHEAD_NODES = 2;
+
+   /** Look this far ahead for FENCE GATES specifically. Tighter than
+    *  the door lookahead because every extra block of gate-open-time
+    *  is another tick during which a nearby sheep / pig / cow can
+    *  slip through the open gate. 0 = only open when the villager
+    *  is standing on the gate node. The pathfinder briefly stalls
+    *  one tick to perform the open, but that's invisible vs. the
+    *  alternative of livestock escaping the pen.
+    *
+    *  <p>Note: this only works because {@code TownsfolkNodeEvaluator}
+    *  reclassifies closed gates as passable. Without that, the path
+    *  wouldn't include the gate node and we'd never open it. */
+   private static final int GATE_LOOKAHEAD_NODES = 0;
 
    /** Squared distance past a door / gate at which we close it behind us.
     *  ~1.5 blocks — tight enough that a sheep pen reseals before any
@@ -117,11 +130,13 @@ public class DoorInteractionGoal extends Goal {
             int from = path.getNextNodeIndex();
             int to = Math.min(path.getNodeCount(), from + LOOKAHEAD_NODES + 1);
             for (int i = from; i < to; i++) {
+               // Steps-ahead index: 0 = current node, 1 = next, etc.
+               int stepsAhead = i - from;
                BlockPos pos = path.getNode(i).asBlockPos();
-               openIfClosed(level, pos);
+               openIfClosed(level, pos, stepsAhead);
                // Doors are two blocks tall; the path may target the lower
                // half — check the upper half too just in case.
-               openIfClosed(level, pos.above());
+               openIfClosed(level, pos.above(), stepsAhead);
             }
          }
       }
@@ -170,8 +185,14 @@ public class DoorInteractionGoal extends Goal {
       Iterator<BlockPos> it = openedByMe.iterator();
       while (it.hasNext()) {
          BlockPos pos = it.next();
+         // MIN_OPEN_TICKS only applies to doors. Gates use lookahead=0,
+         // so the villager is ON the gate node at open time — the
+         // flicker the dwell timer was designed to prevent can't
+         // happen here, and every extra tick the gate is open is
+         // another tick a sheep can slip through.
+         boolean isGate = level.getBlockState(pos).getBlock() instanceof FenceGateBlock;
          Long openedAt = openedAtTick.get(pos);
-         if (openedAt != null && now - openedAt < MIN_OPEN_TICKS) continue;
+         if (!isGate && openedAt != null && now - openedAt < MIN_OPEN_TICKS) continue;
          double dx = mob.getX() - (pos.getX() + 0.5);
          double dy = mob.getY() - (pos.getY() + 0.5);
          double dz = mob.getZ() - (pos.getZ() + 0.5);
@@ -184,7 +205,7 @@ public class DoorInteractionGoal extends Goal {
       }
    }
 
-   private void openIfClosed(Level level, BlockPos pos) {
+   private void openIfClosed(Level level, BlockPos pos, int stepsAhead) {
       BlockState state = level.getBlockState(pos);
       if (state.getBlock() instanceof DoorBlock door) {
          // Skip iron doors — they need redstone and represent intentional locking.
@@ -201,7 +222,16 @@ public class DoorInteractionGoal extends Goal {
                "actor=" + nameOf() + " pos=" + anchor.toShortString(), "");
          }
       } else if (state.getBlock() instanceof FenceGateBlock gate) {
+         // Tighter lookahead for gates: don't open them until the villager
+         // is literally about to step onto the gate node. Every extra
+         // block of "open early" is another window during which a sheep
+         // near the gate can slip through.
+         if (stepsAhead > GATE_LOOKAHEAD_NODES) return;
          if (!state.getValue(FenceGateBlock.OPEN)) {
+            // Before opening, gently displace any livestock loitering on
+            // the immediate threshold so they don't dart through during
+            // the brief open window.
+            nudgeNearbyAnimalsAwayFromGate(level, pos);
             level.setBlock(pos, state.setValue(FenceGateBlock.OPEN, true), 10);
             level.playSound(null, pos,
                SoundEvents.FENCE_GATE_OPEN, SoundSource.BLOCKS, 1.0F, 1.0F);
@@ -214,6 +244,34 @@ public class DoorInteractionGoal extends Goal {
                   + " walkPast=" + mustWalkPast.get(gatePos), "");
          }
       }
+   }
+
+   /** Push any passive livestock (cow, sheep, pig, chicken, etc.) that
+    *  are within ~1.5 blocks of the gate position away from the gate.
+    *  Animals' AI is curious — a villager opening a gate next to a
+    *  parked sheep is a near-guaranteed escape if the sheep is just
+    *  standing on the threshold. A small velocity nudge moves them
+    *  half a block back into the pen, well past the gate's reach
+    *  during the brief open window. */
+   private void nudgeNearbyAnimalsAwayFromGate(Level level, BlockPos gate) {
+      var box = new net.minecraft.world.phys.AABB(gate).inflate(1.5);
+      var animals = level.getEntitiesOfClass(
+         net.minecraft.world.entity.animal.Animal.class, box,
+         a -> a != mob && a.isAlive());
+      if (animals.isEmpty()) return;
+      net.minecraft.world.phys.Vec3 gateCentre =
+         net.minecraft.world.phys.Vec3.atCenterOf(gate);
+      for (var a : animals) {
+         net.minecraft.world.phys.Vec3 away = a.position().subtract(gateCentre);
+         double len = away.length();
+         if (len < 1.0e-3) continue;
+         net.minecraft.world.phys.Vec3 push = away.scale(0.35 / len);
+         a.setDeltaMovement(a.getDeltaMovement().add(push.x, 0.0, push.z));
+         a.hurtMarked = true;
+      }
+      com.yucareux.townfolk.diag.VerboseLog.write("GATE_NUDGE",
+         "actor=" + nameOf() + " gate=" + gate.toShortString()
+            + " animals=" + animals.size(), "");
    }
 
    /** Compute a world-space point ~{@link #WALK_PAST_GATE_BLOCKS} past
