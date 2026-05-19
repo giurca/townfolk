@@ -1337,8 +1337,15 @@ public final class ParcelRoutine {
                var aabb = new net.minecraft.world.phys.AABB(
                   mn.getX(), mn.getY(), mn.getZ(),
                   mx.getX() + 1, mx.getY() + 1, mx.getZ() + 1);
+               // Filter by task.ready(), not just "adult and alive".
+               // ready() bakes in the production-target gate
+               // (MilkCowTask returns false once the milk target is at
+               // cap), so once the town's milk quota is satisfied,
+               // Beatrix won't pester the player for buckets even
+               // though there ARE cows and she HAS no bucket — the
+               // bucket wouldn't get used.
                var here = level.getEntitiesOfClass(task.targetType(), aabb,
-                  a -> a.isAlive() && !a.isBaby());
+                  a -> a.isAlive() && !a.isBaby() && task.ready(level, a, ctx.actor()));
                if (here.isEmpty()) continue;
                String toolName = task.toolItemId() != null
                   ? task.toolItemId().substring(task.toolItemId().indexOf(':') + 1).replace('_', ' ')
@@ -1436,6 +1443,51 @@ public final class ParcelRoutine {
          } else if (tx.startsWith("[need:shears] ") && hasItem(ctx.actor(), "minecraft:shears")) {
             next.set(i, t.withStatus("done"));
             changed = true;
+         } else if (tx.startsWith("[need:") && tx.contains("_tool] ")) {
+            // Livestock-tool todos: [need:milk_cow_tool], [need:shear_sheep_tool], etc.
+            // Resolve back to the LivestockTask, then close the todo
+            // if either (a) the villager now has the tool, or
+            // (b) no animal of the target species on any ANIMAL parcel
+            // is currently a ready target. "Ready" includes the
+            // production-target check, so once the milk quota is met
+            // and there are no other reasons to milk, the [need:milk_cow_tool]
+            // hail stops even if the villager still doesn't own a bucket.
+            int prefixEnd = tx.indexOf("] ");
+            String tag = tx.substring(6, prefixEnd);         // "milk_cow_tool"
+            if (tag.endsWith("_tool")) {
+               String taskId = tag.substring(0, tag.length() - "_tool".length());
+               var taskOpt = com.yucareux.townfolk.world.livestock.LivestockTasks.TOOL_FETCH.stream()
+                  .filter(tk -> tk.id().equals(taskId))
+                  .findFirst();
+               if (taskOpt.isPresent()) {
+                  var task = taskOpt.get();
+                  boolean haveTool = task.hasTool(ctx.actor());
+                  boolean anyReady = false;
+                  if (!haveTool) {
+                     for (var p : comp.parcels()) {
+                        if (p.type() != FieldRegion.Type.ANIMAL) continue;
+                        var mn = p.scanMin(); var mx = p.scanMax();
+                        var aabb = new net.minecraft.world.phys.AABB(
+                           mn.getX(), mn.getY(), mn.getZ(),
+                           mx.getX() + 1, mx.getY() + 1, mx.getZ() + 1);
+                        var hits = ctx.level().getEntitiesOfClass(task.targetType(), aabb,
+                           a -> a.isAlive() && !a.isBaby()
+                              && task.ready(ctx.level(), a, ctx.actor()));
+                        if (!hits.isEmpty()) { anyReady = true; break; }
+                     }
+                  }
+                  if (haveTool || !anyReady) {
+                     next.set(i, t.withStatus("done"));
+                     changed = true;
+                     // Also wipe the per-day LACK_WRITES guard so a
+                     // re-emerging need (target drops below min, animal
+                     // matures) can re-fire today, not be silently
+                     // suppressed for the rest of the day.
+                     var perVillager = LACK_WRITES.get(ctx.actor().getUUID());
+                     if (perVillager != null) perVillager.remove(tag);
+                  }
+               }
+            }
          }
       }
       if (changed) {
