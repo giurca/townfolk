@@ -369,28 +369,11 @@ public final class TownAdminScreen extends Screen {
    }
 
    private void initTasksTabWidgets(int paneL, int paneR, int top, int bottom) {
-      int innerL = paneL + PADDING;
-      int innerR = paneR - PADDING;
-      int listTop = top + 16;
-      int listBottom = bottom - 6;
-      int rowH = 24;
-
-      List<TaskRow> rows = collectOpenTasks();
-      int y = listTop - this.tasksScrollOffset;
-      for (TaskRow r : rows) {
-         if (y + rowH < listTop) { y += rowH; continue; }
-         if (y > listBottom) break;
-         int btnX = innerR - 44;
-         addRenderableWidget(Button.builder(Component.literal("✓"), b ->
-            PacketDistributor.sendToServer(AdminActionPayload.todoComplete(
-               townPos(), r.owner().uuid(), r.todo().id()))
-         ).bounds(btnX, y + 2, 18, 18).build());
-         addRenderableWidget(Button.builder(Component.literal("✕"), b ->
-            PacketDistributor.sendToServer(AdminActionPayload.todoAbandon(
-               townPos(), r.owner().uuid(), r.todo().id()))
-         ).bounds(btnX + 22, y + 2, 18, 18).build());
-         y += rowH;
-      }
+      // Empty by design. The Tasks tab is a grid of custom-drawn tiles
+      // with a click-modal pattern (renderTaskCell + renderTaskPopup
+      // + hitTestTaskPopupButton). The "Mark done" action is now a
+      // chip inside the modal — no per-row vanilla Button widgets to
+      // pre-register here.
    }
 
    // ───────── Trade tab (icon grid + popup detail) ─────────
