@@ -109,10 +109,39 @@ public record RecognizedBuilding(
       return out;
    }
 
+   /** Search radius (XZ) used by {@link #affectedBy} for inactive
+    *  entries. Generous enough to catch a player walling in a marker
+    *  block several tiles away (typical rooms are 5–12 wide). */
+   private static final int INACTIVE_SEARCH_RADIUS_XZ = 16;
+   private static final int INACTIVE_SEARCH_RADIUS_Y  = 8;
+
    /** True iff a block change at {@code pos} should invalidate this
-    *  building. Cheap O(1) since the sets are HashSet-backed. */
+    *  building.
+    *
+    *  <p>For ACTIVE buildings: O(1) hashset lookup on the cached
+    *  boundary + interior sets. Precise — only the structure's own
+    *  blocks trigger re-validation.
+    *
+    *  <p>For INACTIVE buildings: we don't have a useful cached
+    *  structure (recognition failed → boundary/interior were empty
+    *  at the time we recorded them). Instead fall back to a
+    *  bounding-box search around the marker. Any block change
+    *  within ±16 XZ / ±8 Y of the marker triggers re-validation.
+    *  Means the player walling in an existing inactive marker will
+    *  see it flip to active as soon as the room is complete — no
+    *  break-and-replace cycle needed. */
    public boolean affectedBy(BlockPos pos) {
-      return markerPos.equals(pos) || boundary.contains(pos) || interior.contains(pos);
+      if (markerPos.equals(pos)) return true;
+      if (boundary.contains(pos) || interior.contains(pos)) return true;
+      if (!active) {
+         int dx = Math.abs(pos.getX() - markerPos.getX());
+         int dy = Math.abs(pos.getY() - markerPos.getY());
+         int dz = Math.abs(pos.getZ() - markerPos.getZ());
+         if (dx <= INACTIVE_SEARCH_RADIUS_XZ
+             && dz <= INACTIVE_SEARCH_RADIUS_XZ
+             && dy <= INACTIVE_SEARCH_RADIUS_Y) return true;
+      }
+      return false;
    }
 
    // Silence unused-import warning on Tag — kept for future expansion.
