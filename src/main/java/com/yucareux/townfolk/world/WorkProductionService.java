@@ -59,6 +59,23 @@ public final class WorkProductionService {
       if (town == null) return;
       VillagerEntry entry = town.getTown().findVillager(actor.getUUID()).orElse(null);
       if (entry == null) return;
+      // After a successful breed task, do NOT chain-fire. Letting the
+      // polling tick (every 15s) pace the next breed gives the player
+      // visible "the herd is growing slowly" pacing. Without this, a
+      // herder with 6+ eligible animals would burn through every
+      // canFallInLove pair in a single second of back-to-back
+      // chain-fires: wheat evaporates, babies explode, and it looks
+      // like cooldowns are being ignored. The per-animal vanilla
+      // cooldowns ARE working (each parent gets age=6000 set), but
+      // they only gate THAT parent's next breed, not the rest of the
+      // herd. Chain-fire papered over that distinction by sprinting
+      // through every available pair at once. Pacing fixes it.
+      if (cause != null && cause.endsWith(":breed")) {
+         com.yucareux.townfolk.diag.VerboseLog.write("CHAIN_SKIP_BREED",
+            "actor=" + entry.name() + " cause=" + cause,
+            "pacing herd growth — next breed waits for polling tick");
+         return;
+      }
       // Recursion guard: if the chain just enqueued another block task
       // (e.g. harvest → plant), don't fire the routine AGAIN until that
       // new task lands. The polling tick already guards on this; doing
