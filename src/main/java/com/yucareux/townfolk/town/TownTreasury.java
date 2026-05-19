@@ -46,8 +46,10 @@ public final class TownTreasury {
     *  Empty stacks are skipped; multi-slot stacks of the same item are
     *  summed. Returns an empty map if the BE has gone away. */
    private static Map<ResourceLocation, Integer> liveContents(ServerLevel level, BlockPos pos) {
-      var be = level.getBlockEntity(pos);
-      if (!(be instanceof Container c)) return Map.of();
+      // Capability-driven so any mod storage (Sophisticated, Create,
+      // Functional Storage, etc.) is read the same way as vanilla.
+      Container c = ContainerAdapters.at(level, pos);
+      if (c == null) return Map.of();
       LinkedHashMap<ResourceLocation, Integer> out = new LinkedHashMap<>();
       for (int i = 0; i < c.getContainerSize(); i++) {
          ItemStack s = c.getItem(i);
@@ -61,8 +63,8 @@ public final class TownTreasury {
    /** Free-slot count in a Container, used by deposit routing to prefer
     *  barrels that can actually accept the deposit. */
    private static int freeSlots(ServerLevel level, BlockPos pos) {
-      var be = level.getBlockEntity(pos);
-      if (!(be instanceof Container c)) return 0;
+      Container c = ContainerAdapters.at(level, pos);
+      if (c == null) return 0;
       int free = 0;
       for (int i = 0; i < c.getContainerSize(); i++) {
          if (c.getItem(i).isEmpty()) free++;
@@ -83,8 +85,8 @@ public final class TownTreasury {
       int sum = 0;
       for (var e : StorageRegistry.entries(level)) {
          BlockPos pos = BlockPos.of(e.getKey());
-         var be = level.getBlockEntity(pos);
-         if (!(be instanceof Container c)) continue;
+         Container c = ContainerAdapters.at(level, pos);
+         if (c == null) continue;
          for (int i = 0; i < c.getContainerSize(); i++) {
             ItemStack s = c.getItem(i);
             if (s.isEmpty()) continue;

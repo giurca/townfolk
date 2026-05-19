@@ -3,37 +3,44 @@ package com.yucareux.townfolk.town;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
-import net.minecraft.world.level.block.entity.BarrelBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.ChestBlockEntity;
-import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 
 /**
- * Single source of truth for "is this block entity a player-stockpile
+ * Single source of truth for "is this block at a player-stockpile
  * container, and how do I get to it?" Replaces the previously-scattered
- * inline checks in {@code ToolDispatcher.findNearbyContainer},
- * {@code ParcelRoutine.nearestStorageWithin},
- * {@code ParcelRoutine.discoverNearbyContainers},
- * {@code TownTreasury.findNearestWith}, and
- * {@code TownTreasury.findNearestForDeposit}.
+ * inline checks across {@code ToolDispatcher}, {@code ParcelRoutine},
+ * {@code TownTreasury}, and {@code InteractHandler}.
  *
- * Whitelist (player stockpile, accepts arbitrary items):
- *   - {@link BarrelBlockEntity}
- *   - {@link ChestBlockEntity} (incl. trapped chests)
- *   - {@link ShulkerBoxBlockEntity}
+ * <h2>What counts as storage</h2>
+ * Any block whose position exposes NeoForge's
+ * {@code Capabilities.ItemHandler.BLOCK} capability. That covers:
+ * <ul>
+ *   <li>Vanilla chests / barrels / shulker boxes (native exposure)
+ *   <li>Sophisticated Storage barrels and drawers
+ *   <li>Create item vaults
+ *   <li>Functional Storage drawers
+ *   <li>Iron / Diamond / etc Chests
+ *   <li>Any future storage mod that follows the standard capability
+ *       convention
+ * </ul>
  *
- * Explicitly NOT included: furnaces, hoppers, brewing stands, dispensers,
- * droppers, beehives, jukeboxes — they all implement {@link Container}
- * but routing a deposit at one of them silently sends harvest into the
- * wrong slot.
+ * <p>Hoppers / dispensers / droppers / furnaces / brewing stands /
+ * beehives also expose the capability but tend to be functional
+ * machinery rather than player stockpile. We do NOT specifically
+ * exclude them — the player's deliberate sneak-right-click registration
+ * is the gate. If a player explicitly registers a hopper as storage,
+ * they get what they asked for.
  */
 public final class StorageIndex {
 
-   /** True if the block entity is a player-stockpile container. */
+   /** True if a block at the given position exposes an item-handler
+    *  capability — i.e. counts as storage. {@code be} is kept as a
+    *  hint for hot-path callers who already have the block entity
+    *  in hand, but the actual decision is capability-driven. */
    public static boolean isStorage(BlockEntity be) {
-      return be instanceof BarrelBlockEntity
-          || be instanceof ChestBlockEntity
-          || be instanceof ShulkerBoxBlockEntity;
+      if (be == null) return false;
+      if (!(be.getLevel() instanceof ServerLevel level)) return false;
+      return ContainerAdapters.isStorageAt(level, be.getBlockPos());
    }
 
    /** Result of a proximity scan — both the position and the Container view
@@ -65,9 +72,11 @@ public final class StorageIndex {
          for (int dy = -2; dy <= 2; dy++) {
             for (int dz = -radius; dz <= radius; dz++) {
                cur.set(centre.getX() + dx, centre.getY() + dy, centre.getZ() + dz);
-               var be = level.getBlockEntity(cur);
-               if (!isStorage(be)) continue;
-               if (!(be instanceof Container c)) continue;
+               // Capability-driven probe instead of an instanceof BE
+               // check — covers Sophisticated Storage / Create / any
+               // mod that exposes the standard item-handler capability.
+               Container c = ContainerAdapters.at(level, cur);
+               if (c == null) continue;
                Hit candidate = new Hit(cur.immutable(), c);
                if (!ok.test(candidate)) continue;
                double d = cur.distSqr(centre);

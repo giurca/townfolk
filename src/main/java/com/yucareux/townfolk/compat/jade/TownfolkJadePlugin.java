@@ -146,11 +146,10 @@ public final class TownfolkJadePlugin implements IWailaPlugin {
 
       @Override
       public void appendServerData(CompoundTag tag, BlockAccessor accessor) {
-         BlockEntity be = accessor.getBlockEntity();
-         if (!(be instanceof BarrelBlockEntity
-             || be instanceof ChestBlockEntity
-             || be instanceof ShulkerBoxBlockEntity)) return;
          if (!(accessor.getLevel() instanceof net.minecraft.server.level.ServerLevel sl)) return;
+         // Capability-driven check so mod storage (Sophisticated, Create,
+         // etc.) gets the same Jade overlay when registered as town storage.
+         if (!com.yucareux.townfolk.town.ContainerAdapters.isStorageAt(sl, accessor.getPosition())) return;
          StorageConfig cfg = StorageRegistry.find(sl, accessor.getPosition());
          if (cfg == null) return;
          tag.putString(K_BARREL_LABEL, cfg.label() == null ? "" : cfg.label());

@@ -693,14 +693,15 @@ public final class ToolDispatcher {
          // below, which will queue a walk to labelPos.
          double dsq = labelPos.distSqr(actor.blockPosition());
          if (dsq <= 6 * 6) {
-            var be = level.getBlockEntity(labelPos);
+            // Capability-driven lookup so mod storage (Sophisticated /
+            // Create / etc.) resolves via the same path as vanilla.
+            var c = com.yucareux.townfolk.town.ContainerAdapters.at(level, labelPos);
             VerboseLog.write("STORAGE_LABEL_INRANGE",
                "actor=" + self.name() + " labelPos=" + labelPos.toShortString()
                   + " distSq=" + String.format(java.util.Locale.ROOT, "%.2f", dsq)
-                  + " be=" + (be == null ? "null" : be.getClass().getSimpleName())
-                  + " isContainer=" + (be instanceof net.minecraft.world.Container),
+                  + " hasHandler=" + (c != null),
                "");
-            if (be instanceof net.minecraft.world.Container c) {
+            if (c != null) {
                hit = new com.yucareux.townfolk.town.StorageIndex.Hit(labelPos, c);
             }
          } else {
@@ -918,8 +919,8 @@ public final class ToolDispatcher {
             level, hint, actor.blockPosition());
          if (labelPos != null) {
             if (labelPos.distSqr(actor.blockPosition()) <= 6 * 6) {
-               var be = level.getBlockEntity(labelPos);
-               if (be instanceof net.minecraft.world.Container c) {
+               var c = com.yucareux.townfolk.town.ContainerAdapters.at(level, labelPos);
+               if (c != null) {
                   hit = new com.yucareux.townfolk.town.StorageIndex.Hit(labelPos, c);
                }
             } else {
