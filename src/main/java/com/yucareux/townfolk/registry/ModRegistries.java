@@ -93,9 +93,14 @@ public final class ModRegistries {
          .noOcclusion())
    );
 
+   /** Use the CharterStoneItem subclass instead of vanilla BlockItem so
+    *  the stack can render a tooltip summary of its carried TownData
+    *  (town name, prestige, treasury size, villager count) when the
+    *  player breaks and re-places a Charter Stone — see
+    *  {@link com.yucareux.townfolk.block.CharterStoneBlock#getDrops}. */
    public static final Supplier<Item> TOWN_SQUARE_ITEM = ITEMS.register(
       "town_square",
-      () -> new BlockItem(TOWN_SQUARE_BLOCK.get(), new Item.Properties())
+      () -> new com.yucareux.townfolk.item.CharterStoneItem(TOWN_SQUARE_BLOCK.get(), new Item.Properties())
    );
 
    /** Crafted tool that lets the player assign parcels of land to a villager.
