@@ -97,7 +97,14 @@ public final class TownAdminScreen extends Screen {
    /** Toolkit-backed lists. Lazily reconstructed in {@link #ensureListsForBounds}
     *  so resizing the screen rebinds bounds without losing scroll position
     *  between frames. */
-   private UiList<TownStateUpdatePayload.VillagerSummary> villagersList;
+   /** Scroll offset (rows) for the Villagers grid. Mirrors
+    *  {@link #resourcesGridScrollRows}. */
+   private int villagersGridScrollRows = 0;
+
+   /** Cached villager-tile icon. Vanilla villagers don't have an item
+    *  form to render in a grid cell, so we re-use the villager spawn
+    *  egg sprite — universally recognisable and ships with the game. */
+   private net.minecraft.world.item.ItemStack villagerIconStack;
    // ── New for redesigned tabs ──
    /** Row-level scroll offset for the Resources grid. Driven by the
     *  mouse wheel; clamped at render time once the row count is known. */
@@ -1022,7 +1029,7 @@ public final class TownAdminScreen extends Screen {
             if (chipHit != null) {
                if ("prof".equals(chipHit[0]))   this.villagerProfFilter = chipHit[1];
                if ("status".equals(chipHit[0])) this.villagerStatusFilter = chipHit[1];
-               if (this.villagersList != null) this.villagersList.resetScroll();
+               this.villagersGridScrollRows = 0;
                rebuildAdminWidgets();
                return true;
             }
@@ -1141,8 +1148,22 @@ public final class TownAdminScreen extends Screen {
       // Convert physical → logical for hit-test against widget / list bounds.
       mouseX *= INV_CONTENT_SCALE;
       mouseY *= INV_CONTENT_SCALE;
-      if (this.mode == Mode.NORMAL && this.tab == Tab.VILLAGERS && this.villagersList != null
-          && this.villagersList.onMouseScrolled(mouseX, mouseY, scrollY)) return true;
+      if (this.mode == Mode.NORMAL && this.tab == Tab.VILLAGERS) {
+         int paneL = panelLeft();
+         int paneR = panelRight();
+         int top   = panelTop() + 34;
+         int bottom = panelBottom() - PADDING;
+         int innerL = paneL + UiTheme.PADDING;
+         int innerR = paneR - UiTheme.PADDING;
+         int gridTop = top + VILL_GRID_TOP;
+         int gridBot = bottom - 6;
+         if (mouseX >= innerL && mouseX <= innerR
+             && mouseY >= gridTop && mouseY <= gridBot) {
+            this.villagersGridScrollRows = Math.max(0,
+               this.villagersGridScrollRows - (int) Math.signum(scrollY));
+            return true;
+         }
+      }
       if (this.mode == Mode.NORMAL && this.tab == Tab.RESOURCES) {
          if (this.resourcesDrillList != null && this.resourcesDrillList.onMouseScrolled(mouseX, mouseY, scrollY)) return true;
          // Only scroll the grid when the popup isn't covering it and the
@@ -2068,41 +2089,132 @@ public final class TownAdminScreen extends Screen {
       int listBottom = bottom - spawnBtnH;
 
       // Row 1: search box (already placed at top+4 by
-      // initVillagersTabWidgets, innerL..innerL+240) and the
-      // right-aligned column hint for the per-villager calls/tokens/cost
-      // figures rendered on each row.
-      UiText.rightFaint(graphics, this.font, "calls / tokens / cost", innerR, top + 8);
+      // initVillagersTabWidgets, innerL..innerL+240) and a right-aligned
+      // count summary mirroring the Resources tab gold standard.
+      int alive  = this.state.populationAlive();
+      int total  = this.state.villagers().size();
+      String totalLabel = total + " villagers"
+         + (alive == total ? "" : " · " + alive + " alive");
+      UiText.rightFaint(graphics, this.font, totalLabel, innerR, top + 8);
 
       // Row 2: filter chips on their own line below the search box.
       // 10 chips (6 prof + 4 status) plus two row labels won't share a
-      // line with a 240-wide search box without colliding with the
-      // right-aligned column hint — stack them.
+      // line with a 240-wide search box, so stack them.
       int chipsX = innerL;
       int chipsY = top + 26;
       renderVillagerFilterChips(graphics, chipsX, chipsY, mouseX, mouseY);
 
-      int listTop = top + 48;             // below the chip row
+      // Grid layout mirroring the Resources tab (gold standard).
+      // VILL_GRID_TOP corresponds to "below the chip row" — same y the
+      // old list used.
+      int gridTop = top + VILL_GRID_TOP;
+      int gridBot = listBottom - 6;
       List<TownStateUpdatePayload.VillagerSummary> villagers = filteredVillagers();
       if (villagers.isEmpty()) {
          if (this.state.villagers().isEmpty()) {
             UiText.faint(graphics, this.font,
                "no villagers yet — click \"+ Spawn villager\"",
-               innerL, listTop + 10);
+               innerL, gridTop + 10);
          } else {
             UiText.faint(graphics, this.font,
                "no villagers match the current filter",
-               innerL, listTop + 10);
+               innerL, gridTop + 10);
          }
          return;
       }
-      if (this.villagersList == null) {
-         this.villagersList = new UiList<>(innerL, listTop, innerR - innerL, listBottom - listTop,
-            UiTheme.ROW_HEIGHT_MD, this::renderVillagerRow);
-      } else {
-         this.villagersList.setBounds(innerL, listTop, innerR - innerL, listBottom - listTop);
+      int gridW = innerR - innerL;
+      int cols  = Math.max(1, (gridW + VILL_CELL_GAP) / (VILL_CELL_W + VILL_CELL_GAP));
+      int gridUsed = cols * VILL_CELL_W + (cols - 1) * VILL_CELL_GAP;
+      int gridX0   = innerL + (gridW - gridUsed) / 2;
+
+      int totalRows = (villagers.size() + cols - 1) / cols;
+      int visibleRows = Math.max(1, (gridBot - gridTop + VILL_CELL_GAP) / (VILL_CELL_H + VILL_CELL_GAP));
+      int maxScrollRow = Math.max(0, totalRows - visibleRows);
+      if (this.villagersGridScrollRows > maxScrollRow) this.villagersGridScrollRows = maxScrollRow;
+      int scrollPx = this.villagersGridScrollRows * (VILL_CELL_H + VILL_CELL_GAP);
+
+      scaledScissor(graphics, innerL, gridTop, innerR, gridBot);
+      int i = 0;
+      for (var v : villagers) {
+         int row = i / cols;
+         int col = i % cols;
+         int cx = gridX0 + col * (VILL_CELL_W + VILL_CELL_GAP);
+         int cy = gridTop + row * (VILL_CELL_H + VILL_CELL_GAP) - scrollPx;
+         if (cy > gridBot) break;
+         if (cy + VILL_CELL_H < gridTop) { i++; continue; }
+         renderVillagerCell(graphics, v, cx, cy, mouseX, mouseY);
+         i++;
       }
-      this.villagersList.setItems(villagers);
-      this.villagersList.render(graphics, mouseX, mouseY);
+      graphics.disableScissor();
+   }
+
+   /** Villager grid cell geometry. Larger than the Resources cell
+    *  because each tile carries more text — name, activity, HP. */
+   private static final int VILL_CELL_W = 84;
+   private static final int VILL_CELL_H = 72;
+   private static final int VILL_CELL_GAP = 8;
+   /** Y offset (from tab content top) at which the villager grid begins —
+    *  leaves room for the search box (row 1) and chip row (row 2). */
+   private static final int VILL_GRID_TOP = 48;
+
+   /** Render one villager as a tile. Mirrors {@link #renderResourceCell}'s
+    *  visual language: badge strip on top, icon centred, two text lines
+    *  below, optional indicator at the bottom. Click anywhere on the
+    *  tile opens the existing villager-detail modal — same flow as the
+    *  old list rows, just hit-tested against the grid instead. */
+   private void renderVillagerCell(GuiGraphics g,
+                                    TownStateUpdatePayload.VillagerSummary v,
+                                    int x, int y, int mouseX, int mouseY) {
+      boolean hovered = mouseX >= x && mouseX < x + VILL_CELL_W
+                     && mouseY >= y && mouseY < y + VILL_CELL_H;
+      int bg = hovered ? TAB_ACTIVE_BG : ROW_BG;
+      g.fill(x, y, x + VILL_CELL_W, y + VILL_CELL_H, bg);
+      g.fill(x, y + VILL_CELL_H, x + VILL_CELL_W, y + VILL_CELL_H + 1, PANEL_BORDER);
+
+      // Status pip top-left. Green = working, faint gray = idle, blue = sleeping.
+      int pip;
+      String activity = v.activity();
+      if ("sleeping".equals(activity))      pip = 0xFF6E8FE0;
+      else if ("idle".equals(activity))     pip = UiTheme.FAINT;
+      else                                  pip = UiTheme.OK;
+      g.fill(x + 3, y + 3, x + 7, y + 7, pip);
+
+      // Anchor icons top-right.
+      String anchor = (v.playerSetHome() && v.playerSetJob()) ? "⌂⚒"
+                    : v.playerSetHome() ? "⌂" : v.playerSetJob() ? "⚒" : "";
+      if (!anchor.isEmpty()) {
+         int aw = this.font.width(anchor);
+         g.drawString(this.font, anchor, x + VILL_CELL_W - aw - 4, y + 2, FG_DIM, true);
+      }
+
+      // Spawn-egg icon, centred.
+      if (this.villagerIconStack == null) {
+         this.villagerIconStack = new net.minecraft.world.item.ItemStack(
+            net.minecraft.world.item.Items.VILLAGER_SPAWN_EGG);
+      }
+      int iconX = x + (VILL_CELL_W - 16) / 2;
+      int iconY = y + 12;
+      g.renderItem(this.villagerIconStack, iconX, iconY);
+
+      // Name centred — truncated to fit. Dim if dead.
+      String name = v.name() + (v.alive() ? "" : " ✝");
+      String nameClip = UiText.truncate(this.font, name, VILL_CELL_W - 6);
+      int nw = this.font.width(nameClip);
+      g.drawString(this.font, nameClip,
+         x + (VILL_CELL_W - nw) / 2, y + 32,
+         v.alive() ? UiTheme.BODY : UiTheme.FAINT, true);
+
+      // Activity, faint, centred.
+      String act = prettifyActivity(activity);
+      String actClip = UiText.truncate(this.font, act, VILL_CELL_W - 6);
+      int aw2 = this.font.width(actClip);
+      g.drawString(this.font, actClip,
+         x + (VILL_CELL_W - aw2) / 2, y + 44, UiTheme.FAINT, true);
+
+      // HP bar near the bottom, centred 60 wide.
+      int hpBarW = 60, hpBarH = 4;
+      int hpX = x + (VILL_CELL_W - hpBarW) / 2;
+      UiBar.draw(g, hpX, y + 58, hpBarW, hpBarH, v.health(), v.maxHealth());
    }
 
    /** Apply the search box + filter chips to the villager roster. */
@@ -2189,53 +2301,42 @@ public final class TownAdminScreen extends Screen {
       return null;
    }
 
-   private void renderVillagerRow(UiList.Row<TownStateUpdatePayload.VillagerSummary> row) {
-      var v = row.item();
-      var g = row.g();
-      int x = row.x(), y = row.y(), w = row.w();
-
-      String label = v.name() + (v.alive() ? "" : " (dead)");
-      g.drawString(this.font, label, x + 6, y + 4,
-         v.alive() ? UiTheme.BODY : UiTheme.FAINT, true);
-      UiText.heading(g, this.font, prettifyActivity(v.activity()), x + 6, y + 14);
-
-      // Inventory line (top-3 + overflow count).
-      StringBuilder inv = new StringBuilder();
-      var items = v.inventory();
-      if (items.isEmpty()) {
-         inv.append("inventory: empty");
-      } else {
-         inv.append("inv: ");
-         int n = Math.min(3, items.size());
-         for (int i = 0; i < n; i++) {
-            if (i > 0) inv.append(", ");
-            inv.append(items.get(i).count()).append("× ").append(shortItemName(items.get(i).itemId()));
-         }
-         if (items.size() > n) inv.append(", +").append(items.size() - n).append(" more");
-      }
-      int invMaxW = w - 12 - 120;
-      UiText.faint(g, this.font, UiText.truncate(this.font, inv.toString(), invMaxW),
-         x + 6, y + 24);
-
-      // Right side: HP bar, anchor icons, calls/tokens/cost.
-      int hpBarW = 60, hpBarH = 4;
-      int hpX = x + w - 6 - hpBarW;
-      UiBar.draw(g, hpX, y + 6, hpBarW, hpBarH, v.health(), v.maxHealth());
-
-      String anchor = (v.playerSetHome() && v.playerSetJob()) ? "⌂⚒"
-                    : v.playerSetHome() ? "⌂" : v.playerSetJob() ? "⚒" : "—";
-      UiText.rightMuted(g, this.font, anchor, x + w - 6, y + 14);
-
-      String metric = String.format(Locale.ROOT,
-         "%d / %d / $%.4f", v.llmCalls(), v.inputTokens() + v.outputTokens(), v.estCostUsd());
-      UiText.rightFaint(g, this.font, metric, x + w - 6, y + 24);
-   }
-
+   /** Hit-test the villager grid. Mirrors the layout used by
+    *  {@link #renderVillagersBody} — recompute the same cell rects
+    *  and find which one contains the cursor. Returns the villager's
+    *  UUID, or null if the click missed every cell. */
    private UUID villagerAtPoint(double mouseX, double mouseY) {
-      if (this.villagersList == null) return null;
-      var hit = this.villagersList.itemAt(mouseX, mouseY);
-      return hit == null ? null : hit.uuid();
+      int paneL = panelLeft();
+      int paneR = panelRight();
+      int top   = panelTop() + 34;
+      int bottom = panelBottom() - PADDING;
+      int spawnBtnH = 26;
+      int innerL = paneL + UiTheme.PADDING;
+      int innerR = paneR - UiTheme.PADDING;
+      int gridTop = top + VILL_GRID_TOP;
+      int gridBot = bottom - spawnBtnH - 6;
+      if (mouseX < innerL || mouseX > innerR || mouseY < gridTop || mouseY > gridBot) return null;
+
+      var villagers = filteredVillagers();
+      if (villagers.isEmpty()) return null;
+      int gridW = innerR - innerL;
+      int cols  = Math.max(1, (gridW + VILL_CELL_GAP) / (VILL_CELL_W + VILL_CELL_GAP));
+      int gridUsed = cols * VILL_CELL_W + (cols - 1) * VILL_CELL_GAP;
+      int gridX0   = innerL + (gridW - gridUsed) / 2;
+      int scrollPx = this.villagersGridScrollRows * (VILL_CELL_H + VILL_CELL_GAP);
+      for (int i = 0; i < villagers.size(); i++) {
+         int row = i / cols;
+         int col = i % cols;
+         int cx = gridX0 + col * (VILL_CELL_W + VILL_CELL_GAP);
+         int cy = gridTop + row * (VILL_CELL_H + VILL_CELL_GAP) - scrollPx;
+         if (mouseX >= cx && mouseX < cx + VILL_CELL_W
+             && mouseY >= cy && mouseY < cy + VILL_CELL_H) {
+            return villagers.get(i).uuid();
+         }
+      }
+      return null;
    }
+
 
    /** Schedule activity → friendlier label for inline display. */
    private static String prettifyActivity(String a) {
