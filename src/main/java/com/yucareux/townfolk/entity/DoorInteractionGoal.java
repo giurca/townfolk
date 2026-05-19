@@ -43,6 +43,21 @@ public class DoorInteractionGoal extends Goal {
     *  is the LOWER half of a door or the single block of a fence gate. */
    private final Set<BlockPos> openedByMe = new HashSet<>();
 
+   /** Game-time tick at which we opened each entry in {@link #openedByMe}.
+    *  Close-behind enforces a minimum dwell time so we don't open and
+    *  immediately close a door that was opened from path-lookahead while
+    *  the villager was still > CLOSE_BEHIND_DIST away. Without this, a
+    *  door 3 blocks ahead on the path opens in one tick and closes in
+    *  the same tick — looking from the outside like a 10 Hz flicker. */
+   private final java.util.Map<BlockPos, Long> openedAtTick = new java.util.HashMap<>();
+
+   /** Minimum ticks a door / gate must be open before close-behind can
+    *  fire on it. 10 ticks = 0.5 s — plenty for the villager to take
+    *  the next step or two toward the door, but short enough that the
+    *  door isn't left hanging open for long when the villager really
+    *  is past it. */
+   private static final long MIN_OPEN_TICKS = 10L;
+
    /** For each fence gate we opened, the world-space point the villager
     *  MUST walk past before close-behind fires. Computed at open-time
     *  as "2.5 blocks past the gate in the direction of travel". If the
@@ -147,16 +162,23 @@ public class DoorInteractionGoal extends Goal {
          }
       }
 
-      // Close anything we opened once we're well past it.
+      // Close anything we opened once we're well past it. Enforces a
+      // minimum dwell time (MIN_OPEN_TICKS) so a door opened from
+      // path-lookahead while the villager was still > CLOSE_BEHIND_DIST
+      // away doesn't flicker open-and-close in the same tick.
+      long now = level.getGameTime();
       Iterator<BlockPos> it = openedByMe.iterator();
       while (it.hasNext()) {
          BlockPos pos = it.next();
+         Long openedAt = openedAtTick.get(pos);
+         if (openedAt != null && now - openedAt < MIN_OPEN_TICKS) continue;
          double dx = mob.getX() - (pos.getX() + 0.5);
          double dy = mob.getY() - (pos.getY() + 0.5);
          double dz = mob.getZ() - (pos.getZ() + 0.5);
          if (dx * dx + dy * dy + dz * dz > CLOSE_BEHIND_DIST_SQ) {
             closeIfOpen(level, pos);
             it.remove();
+            openedAtTick.remove(pos);
             mustWalkPast.remove(pos);     // gate closed, drop any push entry
          }
       }
@@ -172,7 +194,9 @@ public class DoorInteractionGoal extends Goal {
             // Record the lower half as the anchor for close-behind.
             BlockPos anchor = state.getValue(DoorBlock.HALF) == net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER
                ? pos.below() : pos;
-            openedByMe.add(anchor.immutable());
+            BlockPos immutable = anchor.immutable();
+            openedByMe.add(immutable);
+            openedAtTick.put(immutable, level.getGameTime());
             com.yucareux.townfolk.diag.VerboseLog.write("DOOR_OPEN",
                "actor=" + nameOf() + " pos=" + anchor.toShortString(), "");
          }
@@ -183,6 +207,7 @@ public class DoorInteractionGoal extends Goal {
                SoundEvents.FENCE_GATE_OPEN, SoundSource.BLOCKS, 1.0F, 1.0F);
             BlockPos gatePos = pos.immutable();
             openedByMe.add(gatePos);
+            openedAtTick.put(gatePos, level.getGameTime());
             mustWalkPast.put(gatePos, computeWalkPastTarget(gatePos));
             com.yucareux.townfolk.diag.VerboseLog.write("GATE_OPEN",
                "actor=" + nameOf() + " pos=" + gatePos.toShortString()
