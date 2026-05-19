@@ -1870,13 +1870,19 @@ public final class TownAdminScreen extends Screen {
             items.add(new ResCell(ic, true));
          }
       }
-      switch (this.resourceSort) {
-         case "name"   -> items.sort((a, b) -> shortItemName(a.ic().itemId()).compareToIgnoreCase(shortItemName(b.ic().itemId())));
-         case "recent" -> items.sort((a, b) -> Long.compare(
-                                this.resourceRecentByItem.getOrDefault(b.ic().itemId(), 0L),
-                                this.resourceRecentByItem.getOrDefault(a.ic().itemId(), 0L)));
-         default        -> items.sort((a, b) -> Integer.compare(b.ic().count(), a.ic().count()));
-      }
+      // Treasury (CLAIM) cells ALWAYS come first regardless of sort
+      // mode — they're claimable payouts and the player wants to see
+      // them before the regular stockpile. Within each partition the
+      // user-chosen sort key applies.
+      java.util.Comparator<ResCell> within = switch (this.resourceSort) {
+         case "name"   -> (a, b) -> shortItemName(a.ic().itemId()).compareToIgnoreCase(shortItemName(b.ic().itemId()));
+         case "recent" -> (a, b) -> Long.compare(
+            this.resourceRecentByItem.getOrDefault(b.ic().itemId(), 0L),
+            this.resourceRecentByItem.getOrDefault(a.ic().itemId(), 0L));
+         default        -> (a, b) -> Integer.compare(b.ic().count(), a.ic().count());
+      };
+      items.sort(java.util.Comparator.<ResCell, Boolean>comparing(c -> !c.treasury())
+         .thenComparing(within));
 
       // Render grid.
       int gridTop = top + RES_GRID_TOP;
@@ -2238,13 +2244,19 @@ public final class TownAdminScreen extends Screen {
          if (q.isEmpty() || shortItemName(ic.itemId()).toLowerCase(Locale.ROOT).contains(q)
              || ic.itemId().contains(q)) items.add(new ResCell(ic, true));
       }
-      switch (this.resourceSort) {
-         case "name"   -> items.sort((a, b) -> shortItemName(a.ic().itemId()).compareToIgnoreCase(shortItemName(b.ic().itemId())));
-         case "recent" -> items.sort((a, b) -> Long.compare(
-                                this.resourceRecentByItem.getOrDefault(b.ic().itemId(), 0L),
-                                this.resourceRecentByItem.getOrDefault(a.ic().itemId(), 0L)));
-         default        -> items.sort((a, b) -> Integer.compare(b.ic().count(), a.ic().count()));
-      }
+      // Treasury (CLAIM) cells ALWAYS come first regardless of sort
+      // mode — they're claimable payouts and the player wants to see
+      // them before the regular stockpile. Within each partition the
+      // user-chosen sort key applies.
+      java.util.Comparator<ResCell> within = switch (this.resourceSort) {
+         case "name"   -> (a, b) -> shortItemName(a.ic().itemId()).compareToIgnoreCase(shortItemName(b.ic().itemId()));
+         case "recent" -> (a, b) -> Long.compare(
+            this.resourceRecentByItem.getOrDefault(b.ic().itemId(), 0L),
+            this.resourceRecentByItem.getOrDefault(a.ic().itemId(), 0L));
+         default        -> (a, b) -> Integer.compare(b.ic().count(), a.ic().count());
+      };
+      items.sort(java.util.Comparator.<ResCell, Boolean>comparing(c -> !c.treasury())
+         .thenComparing(within));
       int scrollPx = this.resourcesGridScrollRows * (RES_CELL_H + RES_CELL_GAP);
       int i = 0;
       for (var cell : items) {
