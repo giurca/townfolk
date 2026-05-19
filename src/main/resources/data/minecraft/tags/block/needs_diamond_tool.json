@@ -1,0 +1,7 @@
+{
+  "_comment": "Charter Stone is a town anchor with persistent state attached — gate it behind diamond+ pickaxe so it isn't trivially griefable by an early-game player or hostile mob. Pairs with mineable/pickaxe.",
+  "replace": false,
+  "values": [
+    "townfolk:town_square"
+  ]
+}

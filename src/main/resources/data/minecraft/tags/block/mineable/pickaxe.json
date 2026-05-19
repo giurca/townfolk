@@ -1,0 +1,7 @@
+{
+  "_comment": "Add Charter Stone to the pickaxe-mineable tag so .requiresCorrectToolForDrops() resolves: pickaxe = correct tool.",
+  "replace": false,
+  "values": [
+    "townfolk:town_square"
+  ]
+}
