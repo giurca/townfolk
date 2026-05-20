@@ -105,7 +105,9 @@ public final class TownAdminScreen extends Screen {
     *  between frames. */
    /** Scroll offset (rows) for the Villagers grid. Mirrors
     *  {@link #resourcesGridScrollRows}. */
-   private int villagersGridScrollRows = 0;
+   /** Row scroll for the Villagers grid. Pkg-private — mutated by
+    *  {@link VillagersRenderer} (clamping) and the scroll handler. */
+   int villagersGridScrollRows = 0;
 
    /** Profession id → cached ItemStack used as that profession's tile
     *  icon. Built lazily on first lookup; reused across frames. Falls
@@ -159,12 +161,13 @@ public final class TownAdminScreen extends Screen {
    private String resTargetBoundItem;
    /** Free-text search filter for the Villagers tab — matches against
     *  name, profession, or activity. */
-   private EditBox villagerSearchBox;
+   /** Pkg-private — read by {@link VillagersRenderer} for filtering. */
+   EditBox villagerSearchBox;
    /** "all" / "farmer" / "shepherd" / "butcher" / "mason" / "none".
     *  Filter chip click toggles into / out of "all". */
-   private String villagerProfFilter = "all";
+   String villagerProfFilter = "all";
    /** "all" / "working" / "idle" / "sleeping" — filter chip on activity. */
-   private String villagerStatusFilter = "all";
+   String villagerStatusFilter = "all";
    private Mode mode = Mode.NORMAL;
 
    /** Sub-tabs inside VILLAGER_DETAIL mode. Each renders its own body
@@ -1126,7 +1129,7 @@ public final class TownAdminScreen extends Screen {
             // Filter chips intercept before the list row hit. The chips
             // are rendered using render-side contentTop (paneT + 22 +
             // 16 = paneT + 38), so the hit-test uses the same.
-            String[] chipHit = hitTestVillagerChips(mouseX, mouseY, paneL, paneT + 22 + 16);
+            String[] chipHit = VillagersRenderer.hitTestChips(this, mouseX, mouseY, paneL, paneT + 22 + 16);
             if (chipHit != null) {
                if ("prof".equals(chipHit[0]))   this.villagerProfFilter = chipHit[1];
                if ("status".equals(chipHit[0])) this.villagerStatusFilter = chipHit[1];
@@ -1134,7 +1137,8 @@ public final class TownAdminScreen extends Screen {
                rebuildAdminWidgets();
                return true;
             }
-            UUID clicked = villagerAtPoint(mouseX, mouseY);
+            UUID clicked = VillagersRenderer.villagerAtPoint(this, mouseX, mouseY,
+               panelLeft(), panelRight(), panelTop() + 34, panelBottom() - PADDING);
             if (clicked != null) {
                this.selectedVillager = clicked;
                this.mode = Mode.VILLAGER_DETAIL;
@@ -1366,7 +1370,7 @@ public final class TownAdminScreen extends Screen {
          int bottom = panelBottom() - PADDING;
          int innerL = paneL + UiTheme.PADDING;
          int innerR = paneR - UiTheme.PADDING;
-         int gridTop = top + VILL_GRID_TOP;
+         int gridTop = top + VillagersRenderer.VILL_GRID_TOP;
          int gridBot = bottom - 6;
          if (mouseX >= innerL && mouseX <= innerR
              && mouseY >= gridTop && mouseY <= gridBot) {
@@ -1536,7 +1540,7 @@ public final class TownAdminScreen extends Screen {
             int contentBottom = b - PADDING;
             switch (this.tab) {
                case OVERVIEW -> OverviewRenderer.render(this, graphics, l, r, contentTop, contentBottom);
-               case VILLAGERS -> renderVillagersTab(graphics, l, r, contentTop, contentBottom, lmX, lmY);
+               case VILLAGERS -> VillagersRenderer.render(this, graphics, l, r, contentTop, contentBottom, lmX, lmY);
                case RESOURCES -> renderResourcesTab(graphics, l, r, contentTop, contentBottom, lmX, lmY);
                case PARCELS -> ParcelsRenderer.render(this, graphics, l, r, contentTop, contentBottom, lmX, lmY);
                case TRADE -> TradeRenderer.render(this, graphics, l, r, contentTop, contentBottom);
@@ -1671,7 +1675,7 @@ public final class TownAdminScreen extends Screen {
 
       // Sort chips to the right of the search box.
       int chipsX = innerL + 206;
-      drawChipRow(graphics, chipsX, top + 4, "Sort:",
+      VillagersRenderer.drawChipRow(this, graphics, chipsX, top + 4, "Sort:",
          new String[]{"count", "name", "recent"}, this.resourceSort);
 
       // Refresh recency cache for the "recent" sort.
@@ -2163,225 +2167,7 @@ public final class TownAdminScreen extends Screen {
 
 
 
-   private void renderVillagersTab(GuiGraphics graphics, int paneL, int paneR,
-                                   int top, int bottom, int mouseX, int mouseY) {
-      int innerL = paneL + UiTheme.PADDING;
-      int innerR = paneR - UiTheme.PADDING;
-      int spawnBtnH = 26;
-      // Padding under the tab strip so content doesn't smash against the underline.
-      int contentTop = top + 10;
-      int listBottom = bottom - spawnBtnH;
-
-      // Row 1: search box (already placed at top+4 by
-      // initVillagersTabWidgets, innerL..innerL+240) and a right-aligned
-      // count summary mirroring the Resources tab gold standard.
-      int alive  = this.state.populationAlive();
-      int total  = this.state.villagers().size();
-      String totalLabel = total + " villagers"
-         + (alive == total ? "" : " · " + alive + " alive");
-      UiText.rightFaint(graphics, this.font, totalLabel, innerR, top + 8);
-
-      // Row 2: filter chips on their own line below the search box.
-      // 10 chips (6 prof + 4 status) plus two row labels won't share a
-      // line with a 240-wide search box, so stack them.
-      int chipsX = innerL;
-      int chipsY = top + 26;
-      renderVillagerFilterChips(graphics, chipsX, chipsY, mouseX, mouseY);
-
-      // Grid layout mirroring the Resources tab (gold standard).
-      // VILL_GRID_TOP corresponds to "below the chip row" — same y the
-      // old list used.
-      int gridTop = top + VILL_GRID_TOP;
-      int gridBot = listBottom - 6;
-      List<TownStateUpdatePayload.VillagerSummary> villagers = filteredVillagers();
-      if (villagers.isEmpty()) {
-         if (this.state.villagers().isEmpty()) {
-            UiText.faint(graphics, this.font,
-               "no villagers yet — click \"+ Spawn villager\"",
-               innerL, gridTop + 10);
-         } else {
-            UiText.faint(graphics, this.font,
-               "no villagers match the current filter",
-               innerL, gridTop + 10);
-         }
-         return;
-      }
-      int gridW = innerR - innerL;
-      int cols  = Math.max(1, (gridW + VILL_CELL_GAP) / (VILL_CELL_W + VILL_CELL_GAP));
-      int gridUsed = cols * VILL_CELL_W + (cols - 1) * VILL_CELL_GAP;
-      int gridX0   = innerL + (gridW - gridUsed) / 2;
-
-      int totalRows = (villagers.size() + cols - 1) / cols;
-      int visibleRows = Math.max(1, (gridBot - gridTop + VILL_CELL_GAP) / (VILL_CELL_H + VILL_CELL_GAP));
-      int maxScrollRow = Math.max(0, totalRows - visibleRows);
-      if (this.villagersGridScrollRows > maxScrollRow) this.villagersGridScrollRows = maxScrollRow;
-      int scrollPx = this.villagersGridScrollRows * (VILL_CELL_H + VILL_CELL_GAP);
-
-      scaledScissor(graphics, innerL, gridTop, innerR, gridBot);
-      int i = 0;
-      for (var v : villagers) {
-         int row = i / cols;
-         int col = i % cols;
-         int cx = gridX0 + col * (VILL_CELL_W + VILL_CELL_GAP);
-         int cy = gridTop + row * (VILL_CELL_H + VILL_CELL_GAP) - scrollPx;
-         if (cy > gridBot) break;
-         if (cy + VILL_CELL_H < gridTop) { i++; continue; }
-         renderVillagerCell(graphics, v, cx, cy, mouseX, mouseY);
-         i++;
-      }
-      graphics.disableScissor();
-   }
-
-   /** Villager grid cell geometry. Larger than the Resources cell
-    *  because each tile carries more text — name, activity, HP. */
-   private static final int VILL_CELL_W = 84;
-   private static final int VILL_CELL_H = 72;
-   private static final int VILL_CELL_GAP = 8;
-   /** Y offset (from tab content top) at which the villager grid begins —
-    *  leaves room for the search box (row 1) and chip row (row 2). */
-   private static final int VILL_GRID_TOP = 48;
-
-   /** Render one villager as a tile. Mirrors {@link #renderResourceCell}'s
-    *  visual language: badge strip on top, icon centred, two text lines
-    *  below, optional indicator at the bottom. Click anywhere on the
-    *  tile opens the existing villager-detail modal — same flow as the
-    *  old list rows, just hit-tested against the grid instead. */
-   private void renderVillagerCell(GuiGraphics g,
-                                    TownStateUpdatePayload.VillagerSummary v,
-                                    int x, int y, int mouseX, int mouseY) {
-      boolean hovered = mouseX >= x && mouseX < x + VILL_CELL_W
-                     && mouseY >= y && mouseY < y + VILL_CELL_H;
-      int bg = hovered ? TAB_ACTIVE_BG : ROW_BG;
-      g.fill(x, y, x + VILL_CELL_W, y + VILL_CELL_H, bg);
-      g.fill(x, y + VILL_CELL_H, x + VILL_CELL_W, y + VILL_CELL_H + 1, PANEL_BORDER);
-
-      // Status pip top-left. Green = working, faint gray = idle, blue = sleeping.
-      int pip;
-      String activity = v.activity();
-      if ("sleeping".equals(activity))      pip = 0xFF6E8FE0;
-      else if ("idle".equals(activity))     pip = UiTheme.FAINT;
-      else                                  pip = UiTheme.OK;
-      g.fill(x + 3, y + 3, x + 7, y + 7, pip);
-
-      // Anchor icons top-right.
-      String anchor = (v.playerSetHome() && v.playerSetJob()) ? "⌂⚒"
-                    : v.playerSetHome() ? "⌂" : v.playerSetJob() ? "⚒" : "";
-      if (!anchor.isEmpty()) {
-         int aw = this.font.width(anchor);
-         g.drawString(this.font, anchor, x + VILL_CELL_W - aw - 4, y + 2, FG_DIM, true);
-      }
-
-      // Profession-themed icon, centred. Each profession maps to a
-      // recognisable tool/output item; "none"/unknown falls back to a
-      // villager spawn egg.
-      int iconX = x + (VILL_CELL_W - 16) / 2;
-      int iconY = y + 12;
-      g.renderItem(iconForProfession(v.profession()), iconX, iconY);
-
-      // Name centred — truncated to fit. Dim if dead.
-      String name = v.name() + (v.alive() ? "" : " ✝");
-      String nameClip = UiText.truncate(this.font, name, VILL_CELL_W - 6);
-      int nw = this.font.width(nameClip);
-      g.drawString(this.font, nameClip,
-         x + (VILL_CELL_W - nw) / 2, y + 32,
-         v.alive() ? UiTheme.BODY : UiTheme.FAINT, true);
-
-      // Activity, faint, centred.
-      String act = prettifyActivity(activity);
-      String actClip = UiText.truncate(this.font, act, VILL_CELL_W - 6);
-      int aw2 = this.font.width(actClip);
-      g.drawString(this.font, actClip,
-         x + (VILL_CELL_W - aw2) / 2, y + 44, UiTheme.FAINT, true);
-
-      // HP bar near the bottom, centred 60 wide.
-      int hpBarW = 60, hpBarH = 4;
-      int hpX = x + (VILL_CELL_W - hpBarW) / 2;
-      UiBar.draw(g, hpX, y + 58, hpBarW, hpBarH, v.health(), v.maxHealth());
-   }
-
-   /** Apply the search box + filter chips to the villager roster. */
-   private List<TownStateUpdatePayload.VillagerSummary> filteredVillagers() {
-      String q = this.villagerSearchBox == null ? "" :
-         this.villagerSearchBox.getValue().trim().toLowerCase(Locale.ROOT);
-      String prof = this.villagerProfFilter;
-      String status = this.villagerStatusFilter;
-      List<TownStateUpdatePayload.VillagerSummary> out = new java.util.ArrayList<>();
-      for (var v : this.state.villagers()) {
-         if (!q.isEmpty() && !v.name().toLowerCase(Locale.ROOT).contains(q)
-             && !v.profession().toLowerCase(Locale.ROOT).contains(q)
-             && !v.activity().toLowerCase(Locale.ROOT).contains(q)) continue;
-         if (!"all".equals(prof) && !v.profession().equals(prof)) continue;
-         if (!"all".equals(status)) {
-            boolean sleeping = "sleeping".equals(v.activity());
-            boolean idle = "idle".equals(v.activity());
-            switch (status) {
-               case "working" -> { if (sleeping || idle) continue; }
-               case "idle"    -> { if (!idle) continue; }
-               case "sleeping"-> { if (!sleeping) continue; }
-            }
-         }
-         out.add(v);
-      }
-      return out;
-   }
-
-   /** Filter-chip layout for Villagers tab. Rendered (not vanilla widgets)
-    *  so we can wedge them into the dense row strip. Clicks dispatched
-    *  via {@link #handleVillagerFilterChipClick}. */
-   private void renderVillagerFilterChips(GuiGraphics graphics, int x, int y, int mouseX, int mouseY) {
-      String[] profs = {"all", "farmer", "shepherd", "butcher", "mason", "none"};
-      String[] stats = {"all", "working", "idle", "sleeping"};
-      int cursor = x;
-      cursor = drawChipRow(graphics, cursor, y, "Prof:", profs, this.villagerProfFilter);
-      cursor += 12;
-      drawChipRow(graphics, cursor, y, "Status:", stats, this.villagerStatusFilter);
-   }
-
-   /** Returns the rightmost x after the row, so chip groups can be chained. */
-   private int drawChipRow(GuiGraphics graphics, int x, int y, String label,
-                            String[] options, String active) {
-      graphics.drawString(this.font, label, x, y + 4, FG_DIM, true);
-      int cx = x + this.font.width(label) + 4;
-      for (String o : options) {
-         int w = this.font.width(o) + 8;
-         boolean isActive = o.equals(active);
-         int bg = isActive ? TAB_ACTIVE_BG : ROW_BG;
-         int fg = isActive ? FG_ACCENT    : FG_DIM;
-         graphics.fill(cx, y, cx + w, y + 16, bg);
-         graphics.fill(cx, y + 16, cx + w, y + 17, isActive ? FG_ACCENT : FG_FAINT);
-         graphics.drawString(this.font, o, cx + 4, y + 4, fg, true);
-         cx += w + 3;
-      }
-      return cx;
-   }
-
-   /** Hit-test for the chip row. Returns the (group, value) selected, or null.
-    *  Must mirror the (x, y) used by {@link #renderVillagersBody} / the
-    *  chipsX, chipsY locals there. */
-   private String[] hitTestVillagerChips(double mouseX, double mouseY, int paneL, int top) {
-      int x = paneL + UiTheme.PADDING;
-      int y = top + 26;
-      String[] profs = {"all", "farmer", "shepherd", "butcher", "mason", "none"};
-      String[] stats = {"all", "working", "idle", "sleeping"};
-      int cx = x + this.font.width("Prof:") + 4;
-      for (String o : profs) {
-         int w = this.font.width(o) + 8;
-         if (mouseX >= cx && mouseX < cx + w && mouseY >= y && mouseY < y + 17) {
-            return new String[]{"prof", o};
-         }
-         cx += w + 3;
-      }
-      cx += 12;
-      cx += this.font.width("Status:") + 4;
-      for (String o : stats) {
-         int w = this.font.width(o) + 8;
-         if (mouseX >= cx && mouseX < cx + w && mouseY >= y && mouseY < y + 17) {
-            return new String[]{"status", o};
-         }
-         cx += w + 3;
-      }
-      return null;
-   }
+   // Villagers tab render + chip-row + grid hit-test live in {@link VillagersRenderer} (15b.4.e).
 
    /** Map a profession name to a tile icon. Defers to the
     *  {@link com.yucareux.townfolk.villager.ProfessionTraits}
@@ -2392,42 +2178,6 @@ public final class TownAdminScreen extends Screen {
       String key = prof == null ? "" : prof.toLowerCase(Locale.ROOT);
       return this.villagerIconByProfession.computeIfAbsent(key, k ->
          com.yucareux.townfolk.villager.ProfessionTraits.find(k).tileIconStack());
-   }
-
-   /** Hit-test the villager grid. Mirrors the layout used by
-    *  {@link #renderVillagersBody} — recompute the same cell rects
-    *  and find which one contains the cursor. Returns the villager's
-    *  UUID, or null if the click missed every cell. */
-   private UUID villagerAtPoint(double mouseX, double mouseY) {
-      int paneL = panelLeft();
-      int paneR = panelRight();
-      int top   = panelTop() + 34;
-      int bottom = panelBottom() - PADDING;
-      int spawnBtnH = 26;
-      int innerL = paneL + UiTheme.PADDING;
-      int innerR = paneR - UiTheme.PADDING;
-      int gridTop = top + VILL_GRID_TOP;
-      int gridBot = bottom - spawnBtnH - 6;
-      if (mouseX < innerL || mouseX > innerR || mouseY < gridTop || mouseY > gridBot) return null;
-
-      var villagers = filteredVillagers();
-      if (villagers.isEmpty()) return null;
-      int gridW = innerR - innerL;
-      int cols  = Math.max(1, (gridW + VILL_CELL_GAP) / (VILL_CELL_W + VILL_CELL_GAP));
-      int gridUsed = cols * VILL_CELL_W + (cols - 1) * VILL_CELL_GAP;
-      int gridX0   = innerL + (gridW - gridUsed) / 2;
-      int scrollPx = this.villagersGridScrollRows * (VILL_CELL_H + VILL_CELL_GAP);
-      for (int i = 0; i < villagers.size(); i++) {
-         int row = i / cols;
-         int col = i % cols;
-         int cx = gridX0 + col * (VILL_CELL_W + VILL_CELL_GAP);
-         int cy = gridTop + row * (VILL_CELL_H + VILL_CELL_GAP) - scrollPx;
-         if (mouseX >= cx && mouseX < cx + VILL_CELL_W
-             && mouseY >= cy && mouseY < cy + VILL_CELL_H) {
-            return villagers.get(i).uuid();
-         }
-      }
-      return null;
    }
 
 
