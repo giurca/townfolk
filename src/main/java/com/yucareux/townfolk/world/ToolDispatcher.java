@@ -149,14 +149,14 @@ public final class ToolDispatcher {
       def(new String[]{"completed", "done"},false, false, com.yucareux.townfolk.world.verbs.CompleteVerb::run),
       def(new String[]{"sleep"},            false, false, com.yucareux.townfolk.world.verbs.SleepVerb::run),
       def(new String[]{"follow"},           false, false, com.yucareux.townfolk.world.verbs.FollowVerb::run),
-      def(new String[]{"craft"},            false, false, ctx -> doCraft(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"craft"},            false, false, com.yucareux.townfolk.world.verbs.CraftVerb::run),
       def(new String[]{"deposit"},          true,  false, ctx -> doStorage(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body, true)),
       def(new String[]{"withdraw"},         true,  false, ctx -> doStorage(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body, false)),
       def(new String[]{"peek", "inspect"},  true,  false, ctx -> doPeekNearest(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
       def(new String[]{"attack", "defend", "flee"},
                                             false, false, com.yucareux.townfolk.world.verbs.ViolenceVerb::run),
       def(new String[]{"hand"},             false, false, com.yucareux.townfolk.world.verbs.HandVerb::run),
-      def(new String[]{"eat"},              false, false, ctx -> doEat(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"eat"},              false, false, com.yucareux.townfolk.world.verbs.EatVerb::run),
       def(new String[]{"harvest"},          true,  false, ctx -> doHarvest(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
       def(new String[]{"plant"},            true,  false, ctx -> doPlant(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
       def(new String[]{"chop"},             true,  false, ctx -> doChop(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
@@ -239,60 +239,7 @@ public final class ToolDispatcher {
 
    // doForgetParcel moved to {@link com.yucareux.townfolk.world.verbs.ForgetParcelVerb} (16b.2.b).
    // Stub kept here to avoid breaking the file until a clean delete.
-   // ───── crafting (vanilla RecipeManager-backed via RecipeCatalog) ─────
-
-   private static void doCraft(ServerLevel level, TownSquareBlockEntity town,
-                               Villager actor, VillagerEntry self, String what) {
-      String key = what.toLowerCase(Locale.ROOT).trim();
-      // Strip noise the LLM might prepend ("a loaf of bread", "some sticks").
-      key = key.replaceAll("^(a|an|some|one|two|three|four|five|loaf of|piece of)\\s+", "").trim();
-
-      var holderOpt = RecipeCatalog.findByOutputName(level, key);
-      if (holderOpt.isEmpty()) {
-         VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=craft_unknown",
-            "recipe=\"" + what + "\"");
-         town.getTown().log().add(level.getGameTime(), TownLog.Level.INFO,
-            self.name() + " doesn't know how to craft \"" + what + "\"");
-         ActionFeedback.recordFail(actor.getUUID(), level.getGameTime(),
-            "craft \"" + what + "\" — no recipe found");
-         return;
-      }
-      var holder = holderOpt.get();
-      var inv = actor.getInventory();
-      var attempt = RecipeCatalog.tryCraft(level, inv, holder);
-      if (!attempt.ok()) {
-         StringBuilder miss = new StringBuilder();
-         for (var e : attempt.missing().entrySet()) {
-            if (miss.length() > 0) miss.append(", ");
-            miss.append(e.getValue()).append("× ").append(shortName(e.getKey()));
-         }
-         VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=craft_missing",
-            "missing=" + miss);
-         town.getTown().log().add(level.getGameTime(), TownLog.Level.INFO,
-            self.name() + " tried to craft " + key + " but needs " + miss);
-         ActionFeedback.recordFail(actor.getUUID(), level.getGameTime(),
-            "craft " + key + " — missing " + miss);
-         return;
-      }
-      // Overflow goes on the ground at the actor.
-      if (!attempt.leftover().isEmpty()) {
-         net.minecraft.world.entity.item.ItemEntity drop = new net.minecraft.world.entity.item.ItemEntity(
-            level, actor.getX(), actor.getY(), actor.getZ(), attempt.leftover());
-         drop.setPickUpDelay(20);
-         level.addFreshEntity(drop);
-      }
-      ItemStack out = attempt.produced();
-      String outName = shortName(BuiltInRegistries.ITEM.getKey(out.getItem()).toString());
-      long day = level.getGameTime() / 24000L;
-      String msg = self.name() + " crafted " + out.getCount() + "× " + outName;
-      VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=crafted",
-         "recipe=" + key + " out=" + out.getCount() + "× " + outName);
-      town.getTown().log().add(level.getGameTime(), TownLog.Level.INFO, msg);
-      com.yucareux.townfolk.villager.MemoryStore.write(actor, "craft", day,
-         "I crafted " + out.getCount() + "× " + outName);
-      ActionFeedback.recordOk(actor.getUUID(), level.getGameTime(),
-         "crafted " + out.getCount() + "× " + outName);
-   }
+   // doCraft moved to {@link com.yucareux.townfolk.world.verbs.CraftVerb} (17a.2).
 
    private static int countItem(net.minecraft.world.SimpleContainer inv, String itemId) {
       ResourceLocation id = ResourceLocation.parse(itemId);
@@ -819,48 +766,7 @@ public final class ToolDispatcher {
    // doHand (and HAND_PATTERN) moved to {@link com.yucareux.townfolk.world.verbs.HandVerb} (17a.1).
 
 
-   // ───── eat ─────
-
-   private static void doEat(ServerLevel level, TownSquareBlockEntity town,
-                             Villager actor, VillagerEntry self, String hint) {
-      var inv = actor.getInventory();
-      int bestSlot = -1;
-      int bestNutrition = -1;
-      Item hintItem = hint.isEmpty() ? null : RecipeCatalog.resolveItemOpt(hint).orElse(null);
-      for (int i = 0; i < inv.getContainerSize(); i++) {
-         var s = inv.getItem(i);
-         if (s.isEmpty()) continue;
-         var food = s.getFoodProperties(actor);
-         if (food == null) continue;
-         if (hintItem != null && s.getItem() != hintItem) continue;
-         int n = food.nutrition();
-         if (n > bestNutrition) { bestNutrition = n; bestSlot = i; }
-      }
-      if (bestSlot < 0) {
-         ActionFeedback.recordFail(actor.getUUID(), level.getGameTime(),
-            "eat — no edible item in your bag" + (hint.isEmpty() ? "" : " matching \"" + hint + "\""));
-         return;
-      }
-      var stack = inv.getItem(bestSlot);
-      String name = shortName(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
-      var food = stack.getFoodProperties(actor);
-      stack.shrink(1);
-      if (stack.isEmpty()) inv.setItem(bestSlot, ItemStack.EMPTY);
-
-      // Heal a small amount proportional to nutrition.
-      float heal = Math.min(actor.getMaxHealth() - actor.getHealth(),
-         Math.max(1f, (food == null ? 1 : food.nutrition()) * 0.5f));
-      if (heal > 0) actor.heal(heal);
-
-      long day = level.getGameTime() / 24000L;
-      String summary = self.name() + " ate 1× " + name;
-      VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=ate", summary);
-      town.getTown().log().add(level.getGameTime(), TownLog.Level.INFO, summary);
-      com.yucareux.townfolk.villager.MemoryStore.write(actor, "eat", day,
-         "I ate a " + name + " — felt restored.");
-      ActionFeedback.recordOk(actor.getUUID(), level.getGameTime(),
-         "ate 1× " + name + " (healed " + (int) heal + " HP)");
-   }
+   // doEat moved to {@link com.yucareux.townfolk.world.verbs.EatVerb} (17a.2).
 
    // ───── block-task verbs: harvest / plant / chop / mine / place ─────
 
