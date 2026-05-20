@@ -102,6 +102,13 @@ public final class LeisureChooser {
          sb.append("Backstory: ").append(s).append("\n");
       }
       sb.append("Day: ").append(level.getGameTime() / 24000L).append("\n");
+      // Hunger context — one short line per Stage 12c. Skipped when
+      // hunger is unremarkable so the LLM isn't told a meaningless
+      // "fine" status every evening.
+      int hunger = comp.hunger();
+      if (hunger <= 15)      sb.append("Hunger: starving — hasn't eaten in days.\n");
+      else if (hunger <= 35) sb.append("Hunger: very hungry.\n");
+      else if (hunger <= 55) sb.append("Hunger: peckish.\n");
 
       // Recent leisure history pulled directly from the embedded-entry
       // memory list. We don't need RAG retrieval for this — the last few

@@ -111,6 +111,21 @@ public final class BiasEvaluator {
          narration.add("Your feet always itch by sundown.");
       }
 
+      // ── Hunger lean — hungry villagers prefer the comfort of home
+      //    over the social effort of the tavern, and starving ones
+      //    absolutely do. Symmetric with the Stage 12 design intent:
+      //    food is a survival concern; socialising is a luxury. ──
+      int hunger = comp.hunger();
+      if (hunger < 30) {
+         scores.merge(LeisureActivity.STAY_HOME, 1.0, Double::sum);
+         scores.merge(LeisureActivity.TAVERN,   -0.6, Double::sum);
+         scores.merge(LeisureActivity.WALK,     -0.4, Double::sum);
+         narration.add("You're starving — bed sounds better than company tonight.");
+      } else if (hunger < 50) {
+         scores.merge(LeisureActivity.STAY_HOME, 0.4, Double::sum);
+         narration.add("You're feeling peckish.");
+      }
+
       // ── Random nudge — small jitter to break ruts. ──
       double jitter = level.getRandom().nextDouble() * 0.3;
       LeisureActivity[] all = LeisureActivity.values();

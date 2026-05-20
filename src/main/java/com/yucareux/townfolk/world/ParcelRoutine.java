@@ -70,6 +70,20 @@ public final class ParcelRoutine {
          return false;
       }
 
+      // Hunger pacing (Stage 12c): a starving villager works less.
+      // Below 30 hunger, skip ~2/3 of ticks; below 15, skip ~5/6.
+      // They still progress, just visibly slower — gives the player
+      // a feedback signal that food is needed before mortality lands.
+      int hunger = ctx.comp().hunger();
+      if (hunger < 30) {
+         int skipRoll = ctx.level().getRandom().nextInt(hunger < 15 ? 6 : 3);
+         if (skipRoll != 0) {
+            VerboseLog.write("WORK_HUNGER_SKIP",
+               "actor=" + ctx.entry().name() + " hunger=" + hunger, "");
+            return false;
+         }
+      }
+
       // First thing every tick: compact same-item stacks so 34 + 30
       // seeds become one stack of 64 in a single slot. Without this,
       // ItemPickupGoal grabs / sequential harvest drops / shear yields

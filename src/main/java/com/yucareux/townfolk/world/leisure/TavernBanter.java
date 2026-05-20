@@ -181,11 +181,15 @@ public final class TavernBanter {
       if (aComp.backstory() != null && !aComp.backstory().isBlank()) {
          u.append(" — ").append(snippet(aComp.backstory(), 220));
       }
+      String aHunger = hungerNote(aComp.hunger());
+      if (!aHunger.isEmpty()) u.append(" (").append(aHunger).append(")");
       u.append('\n');
       u.append("Speaker B: ").append(bEntry.name());
       if (bComp.backstory() != null && !bComp.backstory().isBlank()) {
          u.append(" — ").append(snippet(bComp.backstory(), 220));
       }
+      String bHunger = hungerNote(bComp.hunger());
+      if (!bHunger.isEmpty()) u.append(" (").append(bHunger).append(")");
       u.append('\n');
       u.append("Setting: a quiet evening at the village tavern.\n");
       u.append("Respond with JSON only.");
@@ -298,6 +302,17 @@ public final class TavernBanter {
 
    private static String pairKey(UUID a, UUID b) {
       return a.compareTo(b) < 0 ? a + "|" + b : b + "|" + a;
+   }
+
+   /** Render a brief hunger note for prompt context, or empty
+    *  when the villager's hunger is unremarkable (≥ 60). The LLM
+    *  uses these one-liners to colour the conversation naturally —
+    *  hungry villagers may grumble about food, etc. */
+   private static String hungerNote(int hunger) {
+      if (hunger <= 15) return "starving — hasn't eaten in days";
+      if (hunger <= 35) return "very hungry";
+      if (hunger <= 55) return "peckish";
+      return "";
    }
 
    private static String snippet(String s, int max) {
