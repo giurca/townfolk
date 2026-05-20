@@ -1206,10 +1206,12 @@ public final class TownAdminScreen extends Screen {
 
       // Per-pin chip buttons (✓ resolve / ✕ delete). Lined up against
       // the rendered pin rows in renderDetailMemoriesBody — Y math must
-      // match.
+      // match. The render draws a "Pinned facts (N/100)" header line
+      // before the first pin row, so we skip 12 px to match.
       int listTop = top + DETAIL_MEMORIES_LIST_TOP;
       int rowH = 22;
       int y = listTop - this.detailTabScroll;
+      y += 12;                  // skip "Pinned facts (N/100)" section header
       for (TownStateUpdatePayload.PinSummary p : v.pinnedFacts()) {
          if (y + rowH < listTop) { y += rowH; continue; }
          if (y > bottom - 40)    break;
