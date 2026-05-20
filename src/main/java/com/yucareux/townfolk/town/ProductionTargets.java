@@ -147,6 +147,21 @@ public final class ProductionTargets extends SavedData {
       return t.active();
    }
 
+   /** Drop every entry belonging to {@code townSquarePos}. Used by
+    *  Charter Stone break-and-replace so leftover targets keyed to
+    *  the old position don't accumulate as orphans. */
+   public static void forgetAllFor(ServerLevel level, BlockPos townSquarePos) {
+      if (townSquarePos == null) return;
+      ProductionTargets reg = get(level);
+      long key = townSquarePos.asLong();
+      boolean changed = reg.byKey.entrySet().removeIf(e -> e.getKey().townSquarePos() == key);
+      if (changed) {
+         reg.setDirty();
+         VerboseLog.write("PRODUCTION_TARGETS_FORGET_TOWN",
+            "town=" + townSquarePos.toShortString(), "");
+      }
+   }
+
    /** Snapshot of the live policy for ONE town, suitable for sending
     *  to the client. */
    public static Map<String, Target> snapshot(ServerLevel level, BlockPos townSquarePos) {
