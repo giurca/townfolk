@@ -68,12 +68,18 @@ public final class ToolDispatcher {
    // Stage 16b.2 will move each handler into its own world/verbs/*Verb.java.
 
    /** Context bundle handed to every verb handler. {@code verbKey} is
-    *  the canonical first keyword of the matched VerbDef (used for
-    *  ReflexService.onAfterVerb); {@code body} is the args after the
-    *  matched verb keyword, normalized. */
+    *  the matched alias from the dispatch table; {@code body} is the
+    *  args after the matched verb keyword, normalized. Convenience
+    *  {@link #log} routes through {@link ToolDispatcher#log} so verb
+    *  files in {@code world.verbs.*} don't depend on the parent
+    *  package's package-private access. */
    public record VerbContext(ServerLevel level, TownSquareBlockEntity town,
                               Villager actor, VillagerEntry self,
-                              String verbKey, String body, String actionRaw) {}
+                              String verbKey, String body, String actionRaw) {
+      public void log(String msg) {
+         ToolDispatcher.log(this.level, this.town, this.self, msg);
+      }
+   }
 
    @FunctionalInterface
    public interface VerbHandler {
@@ -141,14 +147,14 @@ public final class ToolDispatcher {
       def(new String[]{"claim_home", "claim home", "claim_bed", "claim bed"},
                                             false, false, ctx -> doClaimHome(ctx.level, ctx.town, ctx.actor, ctx.self)),
       def(new String[]{"completed", "done"},false, false, ctx -> doComplete(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
-      def(new String[]{"sleep"},            false, false, ctx -> doSleep(ctx.level, ctx.town, ctx.actor, ctx.self)),
-      def(new String[]{"follow"},           false, false, ctx -> doFollow(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"sleep"},            false, false, com.yucareux.townfolk.world.verbs.SleepVerb::run),
+      def(new String[]{"follow"},           false, false, com.yucareux.townfolk.world.verbs.FollowVerb::run),
       def(new String[]{"craft"},            false, false, ctx -> doCraft(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
       def(new String[]{"deposit"},          true,  false, ctx -> doStorage(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body, true)),
       def(new String[]{"withdraw"},         true,  false, ctx -> doStorage(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body, false)),
       def(new String[]{"peek", "inspect"},  true,  false, ctx -> doPeekNearest(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
       def(new String[]{"attack", "defend", "flee"},
-                                            false, false, ctx -> doViolencePlaceholder(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.actionRaw.toLowerCase(Locale.ROOT))),
+                                            false, false, com.yucareux.townfolk.world.verbs.ViolenceVerb::run),
       def(new String[]{"hand"},             false, false, ctx -> doHand(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
       def(new String[]{"eat"},              false, false, ctx -> doEat(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
       def(new String[]{"harvest"},          true,  false, ctx -> doHarvest(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
@@ -163,7 +169,7 @@ public final class ToolDispatcher {
       def(new String[]{"feed"},             true,  false, ctx -> doFeed(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
       def(new String[]{"water"},            true,  false, ctx -> doWater(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
       def(new String[]{"remember", "commit"},
-                                            false, false, ctx -> doRemember(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+                                            false, false, com.yucareux.townfolk.world.verbs.RememberVerb::run),
       def(new String[]{"reflex", "standing_order", "rule"},
                                             false, true,  ctx -> doReflex(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.actionRaw)),
       def(new String[]{"forget_parcel", "drop_parcel", "unbind_parcel"},
@@ -270,47 +276,7 @@ public final class ToolDispatcher {
             + " to " + (recipient == null ? targetName : recipient.name()));
    }
 
-   private static void doFollow(ServerLevel level, TownSquareBlockEntity town,
-                                Villager actor, VillagerEntry self, String targetName) {
-      String t = targetName.toLowerCase(Locale.ROOT).replaceAll("^(the|a|an)\\s+", "").trim();
-      java.util.UUID targetUuid = null;
-      String resolvedName = null;
-      // Players first (so "follow me" / "follow Dev" works).
-      for (var p : level.players()) {
-         if (t.contains(p.getName().getString().toLowerCase(Locale.ROOT))) {
-            targetUuid = p.getUUID();
-            resolvedName = p.getName().getString();
-            break;
-         }
-      }
-      // Then fellow villagers.
-      if (targetUuid == null) {
-         for (VillagerEntry e : town.getTown().villagers()) {
-            if (t.contains(e.name().toLowerCase(Locale.ROOT))) {
-               if (level.getEntity(e.uuid()) != null) {
-                  targetUuid = e.uuid();
-                  resolvedName = e.name();
-                  break;
-               }
-            }
-         }
-      }
-      if (targetUuid == null) {
-         VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=follow_unresolved", "target=\"" + targetName + "\"");
-         town.getTown().log().add(level.getGameTime(), com.yucareux.townfolk.town.TownLog.Level.INFO,
-            self.name() + " can't find " + targetName + " to follow");
-         ActionFeedback.recordFail(actor.getUUID(), level.getGameTime(),
-            "follow " + targetName + " — couldn't resolve target");
-         return;
-      }
-      long expire = level.getGameTime() + FollowService.DEFAULT_DURATION_TICKS;
-      FollowService.start(level, actor.getUUID(), targetUuid, expire);
-      String summary = self.name() + " starts following " + resolvedName;
-      VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=follow", "target=" + resolvedName + " expire=" + expire);
-      town.getTown().log().add(level.getGameTime(), com.yucareux.townfolk.town.TownLog.Level.INFO, summary);
-      ActionFeedback.recordOk(actor.getUUID(), level.getGameTime(),
-         "started following " + resolvedName);
-   }
+   // doFollow moved to {@link com.yucareux.townfolk.world.verbs.FollowVerb} (stage 16b.2.a).
 
    /** Fuzzy-match `what` against the actor's open todos and mark the best one done. */
    private static void doComplete(ServerLevel level, TownSquareBlockEntity town,
@@ -1802,63 +1768,7 @@ public final class ToolDispatcher {
       return false;
    }
 
-   // ───── remember <text> — persist a commitment as a todo ─────
-
-   /** Append a new {@link com.yucareux.townfolk.villager.Todo} to the villager's
-    *  todo list. Used when the player asks for an ongoing commitment ("put any
-    *  wheat into the barrel", "fetch firewood at noon") so the villager has a
-    *  durable record beyond the 8-min action-feedback window or whatever the
-    *  RAG retrieval surfaces.
-    *
-    *  Counterparty is set to the nearest player at the time the marker fires —
-    *  good enough since dialogue happens at the villager's location. The todo
-    *  is then surfaced in EVERY subsequent dialogue/autonomy prompt via the
-    *  OPEN COMMITMENTS section, and can be closed with [ACTION: completed: …]. */
-   private static void doRemember(ServerLevel level, TownSquareBlockEntity town,
-                                  Villager actor, VillagerEntry self, String text) {
-      if (text.isEmpty()) {
-         ActionFeedback.recordFail(actor.getUUID(), level.getGameTime(),
-            "remember — empty commitment text");
-         return;
-      }
-      long day = level.getGameTime() / 24000L;
-      Player p = level.getNearestPlayer(actor, 16.0);
-      String counterparty = p == null ? "" : p.getName().getString();
-
-      com.yucareux.townfolk.villager.LlmVillagerComponent c =
-         actor.getData(com.yucareux.townfolk.registry.ModRegistries.LLM_VILLAGER.get());
-
-      // Skip duplicate-ish open todos so the LLM repeating itself doesn't
-      // pile the list with near-identical entries.
-      String key = text.toLowerCase(Locale.ROOT);
-      for (var existing : c.todos()) {
-         if (existing.isOpen()
-             && existing.text().toLowerCase(Locale.ROOT).equals(key)) {
-            VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=remember_dup",
-               "text=" + text);
-            ActionFeedback.recordOk(actor.getUUID(), level.getGameTime(),
-               "already had that on my list (\"" + text + "\")");
-            return;
-         }
-      }
-
-      com.yucareux.townfolk.villager.Todo todo = new com.yucareux.townfolk.villager.Todo(
-         java.util.UUID.randomUUID().toString(), text, counterparty, "open", day);
-      actor.setData(com.yucareux.townfolk.registry.ModRegistries.LLM_VILLAGER.get(),
-         c.withAppendedTodo(todo));
-
-      String summary = self.name() + " noted a commitment"
-         + (counterparty.isEmpty() ? "" : " for " + counterparty) + ": " + text;
-      VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=remembered",
-         "text=" + text + " with=" + counterparty);
-      town.getTown().log().add(level.getGameTime(), TownLog.Level.INFO, summary);
-      com.yucareux.townfolk.villager.MemoryStore.write(actor, "commitment", day,
-         "I promised" + (counterparty.isEmpty() ? "" : " " + counterparty)
-            + ": " + text);
-      ActionFeedback.recordOk(actor.getUUID(), level.getGameTime(),
-         "added to todos: \"" + text + "\""
-            + (counterparty.isEmpty() ? "" : " (for " + counterparty + ")"));
-   }
+   // doRemember moved to {@link com.yucareux.townfolk.world.verbs.RememberVerb} (stage 16b.2.a).
 
    // ───── reflex / forget — standing orders ─────
 
@@ -1938,41 +1848,12 @@ public final class ToolDispatcher {
          "standing order dropped: \"" + body + "\"");
    }
 
-   /** Capability-scaffolding stub: the LLM grammar reserves attack/defend/flee
-    *  so personas can roleplay around them, but the world is currently set to
-    *  peaceful. When {@code peaceful=false} ships, replace these branches with
-    *  real combat logic; the prompt grammar won't change. */
-   private static void doViolencePlaceholder(ServerLevel level, TownSquareBlockEntity town,
-                                             Villager actor, VillagerEntry self, String action) {
-      boolean peaceful = com.yucareux.townfolk.config.TownfolkConfig.COMMON.peaceful.get();
-      long day = level.getGameTime() / 24000L;
-      if (peaceful) {
-         String msg = self.name() + " would " + action + " but the world is set to peaceful";
-         VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=peaceful_stub",
-            "verb=" + action);
-         town.getTown().log().add(level.getGameTime(), TownLog.Level.INFO, msg);
-         com.yucareux.townfolk.villager.MemoryStore.write(actor, "intent", day,
-            "I wanted to " + action + " but stayed my hand — peace holds in our town.");
-         ActionFeedback.recordFail(actor.getUUID(), level.getGameTime(),
-            action + " — peaceful mode, no combat is possible right now");
-         return;
-      }
-      // Non-peaceful mode: not implemented yet. Same stub for now so the
-      // grammar stays valid; combat logic ships later.
-      VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=combat_not_implemented",
-         "verb=" + action);
-      ActionFeedback.recordFail(actor.getUUID(), level.getGameTime(),
-         action + " — combat behaviour not yet implemented");
-   }
+   // doSleep moved to {@link com.yucareux.townfolk.world.verbs.SleepVerb} (stage 16b.2.a).
+   // doViolencePlaceholder moved to {@link com.yucareux.townfolk.world.verbs.ViolenceVerb}.
 
-   private static void doSleep(ServerLevel level, TownSquareBlockEntity town, Villager actor, VillagerEntry self) {
-      // Try to find a bed within 24 blocks; pathfind there. Don't force-sleep (vanilla
-      // will trigger once the villager reaches a bed at night).
-      actor.getNavigation().stop();
-      log(level, town, self, "decides to find a bed");
-   }
-
-   private static void log(ServerLevel level, TownSquareBlockEntity town, VillagerEntry self, String msg) {
+   /** Pkg-private so verb-handler classes in {@code world.verbs.*}
+    *  can write through the same log channel. */
+   static void log(ServerLevel level, TownSquareBlockEntity town, VillagerEntry self, String msg) {
       VerboseLog.write("ACTION_RESULT", "actor=" + self.name(), msg);
       town.getTown().log().add(level.getGameTime(), TownLog.Level.INFO, self.name() + " " + msg);
    }
