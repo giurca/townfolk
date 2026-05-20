@@ -161,6 +161,23 @@ public final class ParcelRoutine {
       // fall through to other parcels if the active one has nothing
       // actionable left. This implements the "stay until done" rule.
       java.util.List<FieldRegion> ordered = orderParcelsByActive(ctx);
+
+      // Stage 24c: give registered ParcelTask implementations a turn
+      // BEFORE the legacy inline tryAllForParcel dispatch. Currently
+      // there's exactly one (OperateMechanicalFarmTask, Create-only);
+      // future tasks slot in here by adding to PARCEL_TASKS below.
+      // Score-based selection: highest-scoring task across all parcels
+      // wins, ties broken by parcel order.
+      for (FieldRegion parcel : ordered) {
+         com.yucareux.townfolk.world.parcel.tasks.ParcelTask best = null;
+         int bestScore = 0;
+         for (var task : PARCEL_TASKS) {
+            int s = task.score(ctx, parcel);
+            if (s > bestScore) { bestScore = s; best = task; }
+         }
+         if (best != null && best.execute(ctx, parcel)) return true;
+      }
+
       for (FieldRegion parcel : ordered) {
          if (tryAllForParcel(ctx, parcel, haveShears, seed, haveHoe)) return true;
       }
@@ -212,6 +229,18 @@ public final class ParcelRoutine {
     *  enough to plough a small field but short enough that a giant plot
     *  with infinite work doesn't starve the others. */
    private static final long PARCEL_TIME_BUDGET_TICKS = 20L * 60 * 2;
+
+   /** Stage 24c: registered {@link com.yucareux.townfolk.world.parcel.tasks.ParcelTask}
+    *  implementations consulted BEFORE the legacy tryAllForParcel
+    *  inline dispatch. Each task's {@code score} is sampled per
+    *  parcel; the highest non-zero wins. Empty by default; the
+    *  initializer below adds the Create-mod mechanical-farm task
+    *  even if Create isn't installed (the task scores 0 when
+    *  CreateBridge.isAvailable() returns false). */
+   private static final java.util.List<com.yucareux.townfolk.world.parcel.tasks.ParcelTask> PARCEL_TASKS =
+      java.util.List.of(
+         com.yucareux.townfolk.world.parcel.tasks.OperateMechanicalFarmTask.INSTANCE
+      );
 
    /** Per-villager record of which parcel they're currently working and
     *  when they entered it. Used by the parcel ordering to enforce the
