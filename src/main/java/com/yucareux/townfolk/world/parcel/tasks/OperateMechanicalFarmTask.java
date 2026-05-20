@@ -40,34 +40,46 @@ public final class OperateMechanicalFarmTask implements ParcelTask {
    @Override
    public String id() { return "operate_mechanical_farm"; }
 
+   /** Audit P2-A: low base score (1) so vanilla farming branches —
+    *  which run AFTER ParcelTask dispatch in tryTickImpl — can still
+    *  pre-empt this whenever they have something concrete to do
+    *  (ripe crops, dry farmland, etc.). Even at 1 we still win over
+    *  any future task that scores 0; future tasks that should out-
+    *  rank this declare score ≥2. */
+   private static final int BASE_SCORE = 1;
+
    @Override
-   public int score(Ctx ctx, FieldRegion parcel) {
+   public Eval evaluate(Ctx ctx, FieldRegion parcel) {
       CreateBridge bridge = CreateBridge.get();
-      if (!bridge.isAvailable()) return 0;     // Create not loaded
-      if (findFarmComponent(ctx, parcel, bridge) == null) return 0;
-      // Modest priority — vanilla farming (harvest/plant/till) should
-      // beat this when both apply, since the villager being there
-      // is what makes Create farms feel grounded. A future tweak
-      // could bump this when the LLM declares a "mechanical farmer"
-      // role.
-      return 5;
+      if (!bridge.isAvailable()) return Eval.NONE;   // Create not loaded
+      BlockPos pos = findFarmComponent(ctx, parcel, bridge);
+      if (pos == null) return Eval.NONE;
+      // Audit P1-A fix: cache the found pos in the Eval payload so
+      // execute() doesn't re-scan the parcel.
+      return new Eval(BASE_SCORE, pos);
    }
 
    @Override
-   public boolean execute(Ctx ctx, FieldRegion parcel) {
+   public boolean execute(Ctx ctx, FieldRegion parcel, Object payload) {
+      if (!(payload instanceof BlockPos pos)) return false;
       CreateBridge bridge = CreateBridge.get();
-      BlockPos pos = findFarmComponent(ctx, parcel, bridge);
-      if (pos == null) return false;
-      bridge.toggleKineticComponent(ctx.level(), pos);
+      // Audit P1-C fix: respect the bridge's return value. The kinetic
+      // toggle is currently a logged stub returning false — claim only
+      // "inspected" until the redstone-pulse implementation lands.
+      boolean toggled = bridge.toggleKineticComponent(ctx.level(), pos);
       VerboseLog.write("PARCEL_TASK_OPERATE_FARM",
          "actor=" + ctx.entry().name()
             + " parcel=" + parcel.id()
-            + " component=" + pos.toShortString(), "");
+            + " component=" + pos.toShortString()
+            + " toggled=" + toggled, "");
       long day = ctx.level().getGameTime() / 24000L;
-      com.yucareux.townfolk.villager.MemoryStore.write(ctx.actor(), "work", day,
-         "I checked over the mechanical farm at " + pos.toShortString() + ".");
+      String memoryLine = toggled
+         ? "I operated the mechanical farm at " + pos.toShortString() + "."
+         : "I inspected the mechanical farm at " + pos.toShortString() + ".";
+      com.yucareux.townfolk.villager.MemoryStore.write(ctx.actor(), "work", day, memoryLine);
       ActionFeedback.recordOk(ctx.actor().getUUID(), ctx.level().getGameTime(),
-         "operated the mechanical farm at " + pos.toShortString());
+         (toggled ? "operated" : "inspected")
+            + " the mechanical farm at " + pos.toShortString());
       return true;
    }
 

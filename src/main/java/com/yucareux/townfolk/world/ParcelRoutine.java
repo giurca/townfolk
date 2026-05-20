@@ -163,19 +163,29 @@ public final class ParcelRoutine {
       java.util.List<FieldRegion> ordered = orderParcelsByActive(ctx);
 
       // Stage 24c: give registered ParcelTask implementations a turn
-      // BEFORE the legacy inline tryAllForParcel dispatch. Currently
-      // there's exactly one (OperateMechanicalFarmTask, Create-only);
-      // future tasks slot in here by adding to PARCEL_TASKS below.
-      // Score-based selection: highest-scoring task across all parcels
-      // wins, ties broken by parcel order.
+      // BEFORE the legacy inline tryAllForParcel dispatch. Each task's
+      // evaluate() returns score + a cached payload (audit P1-A —
+      // avoids the score-then-execute double-scan that block-tested
+      // implementations would otherwise pay). Highest-score task on
+      // the first parcel-with-work wins.
       for (FieldRegion parcel : ordered) {
-         com.yucareux.townfolk.world.parcel.tasks.ParcelTask best = null;
-         int bestScore = 0;
+         com.yucareux.townfolk.world.parcel.tasks.ParcelTask bestTask = null;
+         com.yucareux.townfolk.world.parcel.tasks.ParcelTask.Eval bestEval = null;
          for (var task : PARCEL_TASKS) {
-            int s = task.score(ctx, parcel);
-            if (s > bestScore) { bestScore = s; best = task; }
+            var eval = task.evaluate(ctx, parcel);
+            if (eval.score() > 0 && (bestEval == null || eval.score() > bestEval.score())) {
+               bestTask = task;
+               bestEval = eval;
+            }
          }
-         if (best != null && best.execute(ctx, parcel)) return true;
+         if (bestTask != null && bestTask.execute(ctx, parcel, bestEval.payload())) {
+            // Audit P1-D fix: fire after:parcel_task:<id> reflexes
+            // matching ToolDispatcher's verb-completion pattern. Lets
+            // players write reflexes against task completion.
+            com.yucareux.townfolk.world.ReflexService.onAfterVerb(
+               ctx.level(), ctx.actor(), "parcel_task:" + bestTask.id());
+            return true;
+         }
       }
 
       for (FieldRegion parcel : ordered) {

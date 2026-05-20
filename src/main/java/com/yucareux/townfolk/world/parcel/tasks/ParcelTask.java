@@ -42,18 +42,34 @@ import net.minecraft.world.item.Item;
  */
 public interface ParcelTask {
 
+   /** Score + cached payload from a single {@link #evaluate} call.
+    *  Threading the payload through avoids the score→execute double-
+    *  scan that audit P1-A flagged: implementations can do the
+    *  expensive lookup (block scan, recipe match) once, stash the
+    *  result here, and read it back in {@link #execute}.
+    *
+    *  <p>{@code payload} is opaque — each task's evaluate + execute
+    *  pair agree on the type. Use {@code null} when no payload is
+    *  needed. */
+   record Eval(int score, Object payload) {
+      public static final Eval NONE = new Eval(0, null);
+   }
+
    /** Stable id used by reflexes + diagnostic logs. Lowercase
     *  snake_case by convention ("harvest_ripe", "operate_farm"). */
    String id();
 
-   /** Priority score for this (villager, parcel) pair. Zero or
-    *  negative means "not relevant right now"; higher means more
-    *  pressing. Compared across all registered tasks per scan. */
-   int score(Ctx ctx, FieldRegion parcel);
+   /** Score + payload for this (villager, parcel) pair. {@code score <= 0}
+    *  means "not relevant right now"; higher = more pressing. Compared
+    *  across all registered tasks per scan. The dispatcher only
+    *  invokes {@link #execute} on the winning task and passes the
+    *  payload from this method's result. */
+   Eval evaluate(Ctx ctx, FieldRegion parcel);
 
-   /** Fire the task. Caller already confirmed {@link #score} &gt; 0.
-    *  Returns true iff some work was actually dispatched. */
-   boolean execute(Ctx ctx, FieldRegion parcel);
+   /** Fire the task. {@code payload} is the value returned by the
+    *  winning {@link #evaluate} call. Returns true iff some work was
+    *  actually dispatched. */
+   boolean execute(Ctx ctx, FieldRegion parcel, Object payload);
 
    /** Item tags this task wants the villager to be carrying — used
     *  by the upstream "missing resource" fall-through to fetch
