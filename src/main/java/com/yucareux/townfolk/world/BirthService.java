@@ -11,6 +11,7 @@ import com.yucareux.townfolk.villager.AgeCategory;
 import com.yucareux.townfolk.villager.Gender;
 import com.yucareux.townfolk.villager.LlmVillagerComponent;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -162,25 +163,53 @@ public final class BirthService {
          && e.getValue().lastSeenDay < today - 1);
    }
 
+   /** Per-pair tracker for the defer log so we only warn once per
+    *  defer streak, not every dawn. */
+   private static final Map<String, Long> LAST_DEFER_LOG_DAY = new ConcurrentHashMap<>();
+
    private static boolean tryBirth(ServerLevel level, TownSquareBlockEntity town,
                                     Candidate a, Candidate b, long today) {
       int cap = PopulationCap.effectiveCap(level);
-      long alive = town.getTown().villagers().stream().filter(VillagerEntry::alive).count();
+      // Stage 18 audit P0 fix: count alive villagers ACROSS the whole
+      // level (every town), not just this town. PopulationCap is
+      // level-wide so the comparison must be too — otherwise a 2-town
+      // world with one home-rich town and one home-poor town would
+      // birth into the poor town indefinitely.
+      long alive = 0;
+      for (TownSquareBlockEntity t : TownSquareBlockEntity.loadedIn(level)) {
+         for (var e : t.getTown().villagers()) if (e.alive()) alive++;
+      }
       if (alive >= cap) {
-         VerboseLog.write("BIRTH_DEFERRED",
-            "town=" + town.getBlockPos().toShortString()
-               + " parents=" + a.entry.name() + "+" + b.entry.name()
-               + " alive=" + alive + " cap=" + cap, "");
-         town.getTown().log().add(level.getGameTime(), TownLog.Level.INFO,
-            a.entry.name() + " and " + b.entry.name()
-               + " want to start a family, but there's no room — build another home.");
+         String pairKey = PairRecord.key(a.entry.uuid(), b.entry.uuid());
+         Long lastLogged = LAST_DEFER_LOG_DAY.get(pairKey);
+         // Audit P1 fix: only log the "no room" line once per defer
+         // streak. The check writes the streak's first-day, then
+         // suppresses re-logs until the pair stops deferring (which
+         // clears the entry on a successful birth path).
+         if (lastLogged == null || lastLogged != today - 1) {
+            VerboseLog.write("BIRTH_DEFERRED",
+               "town=" + town.getBlockPos().toShortString()
+                  + " parents=" + a.entry.name() + "+" + b.entry.name()
+                  + " alive=" + alive + " cap=" + cap, "");
+            town.getTown().log().add(level.getGameTime(), TownLog.Level.INFO,
+               a.entry.name() + " and " + b.entry.name()
+                  + " want to start a family, but there's no room — build another home.");
+         }
+         LAST_DEFER_LOG_DAY.put(pairKey, today);
          return false;
       }
+      // Clear any defer-log throttle now that the cap check passed —
+      // future re-defers (after this birth) will log a fresh streak.
+      LAST_DEFER_LOG_DAY.remove(PairRecord.key(a.entry.uuid(), b.entry.uuid()));
 
       // Find the female parent's HOME for the spawn position.
       Candidate mother = a.comp.gender() == Gender.FEMALE ? a : b;
       Candidate father = mother == a ? b : a;
-      BlockPos spawnPos = mother.homePos.above();
+      // Audit P1 fix: homePos is the FOOT of the bed — scan upward
+      // for the first non-solid tile so the child doesn't suffocate
+      // in a ceiling. Walk up 4 blocks max; if no air, fall back to
+      // homePos.above() and accept whatever happens (test world).
+      BlockPos spawnPos = findSafeSpawn(level, mother.homePos);
 
       Villager child;
       try {
@@ -191,7 +220,7 @@ public final class BirthService {
       }
       if (child == null) return false;
 
-      String childName = pickChildName(mother.entry, father.entry, level);
+      String childName = pickChildName(mother.entry, father.entry, level, town);
       child.moveTo(spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5, 0F, 0F);
       child.setCustomName(Component.literal(childName));
       child.setCustomNameVisible(true);
@@ -239,16 +268,45 @@ public final class BirthService {
       return true;
    }
 
-   /** Pick a child name. Currently uses a deterministic UUID-derived
-    *  pick from a small starter list; future hook would call the LLM
-    *  with both parent personas to generate something thematic. */
-   private static String pickChildName(VillagerEntry mother, VillagerEntry father, ServerLevel level) {
-      String[] names = {
-         "Eira", "Maren", "Tova", "Liesel", "Sigrid", "Anya", "Brenna", "Cara",
-         "Bren", "Cael", "Doran", "Erik", "Finn", "Garet", "Holt", "Ivar"
-      };
-      int idx = (int) (Math.floorMod(level.getGameTime(), names.length));
-      return names[idx];
+   private static final String[] CHILD_NAME_POOL = {
+      "Eira", "Maren", "Tova", "Liesel", "Sigrid", "Anya", "Brenna", "Cara",
+      "Bren", "Cael", "Doran", "Erik", "Finn", "Garet", "Holt", "Ivar"
+   };
+
+   /** Pick a child name that doesn't collide with any living
+    *  townsfolk in this town. Falls back to a numeric suffix if the
+    *  entire pool is exhausted (rare). */
+   private static String pickChildName(VillagerEntry mother, VillagerEntry father,
+                                        ServerLevel level, TownSquareBlockEntity town) {
+      java.util.Set<String> taken = new java.util.HashSet<>();
+      for (var e : town.getTown().villagers()) {
+         if (e.alive()) taken.add(e.name().toLowerCase(Locale.ROOT));
+      }
+      int seed = (int) Math.floorMod(level.getGameTime() + mother.uuid().getLeastSignificantBits(),
+                                      CHILD_NAME_POOL.length);
+      for (int i = 0; i < CHILD_NAME_POOL.length; i++) {
+         String candidate = CHILD_NAME_POOL[(seed + i) % CHILD_NAME_POOL.length];
+         if (!taken.contains(candidate.toLowerCase(Locale.ROOT))) return candidate;
+      }
+      // Exhausted — append a counter.
+      int suffix = 2;
+      while (suffix < 99) {
+         String candidate = CHILD_NAME_POOL[0] + " " + suffix;
+         if (!taken.contains(candidate.toLowerCase(Locale.ROOT))) return candidate;
+         suffix++;
+      }
+      return CHILD_NAME_POOL[0] + " (lost count)";
+   }
+
+   /** Walk up to 4 blocks above {@code homePos} looking for the first
+    *  air block. Falls back to {@code homePos.above()} unconditionally
+    *  if everything's solid. */
+   private static BlockPos findSafeSpawn(ServerLevel level, BlockPos homePos) {
+      for (int dy = 1; dy <= 4; dy++) {
+         BlockPos candidate = homePos.above(dy);
+         if (level.getBlockState(candidate).isAir()) return candidate;
+      }
+      return homePos.above();
    }
 
    /** Bundle holding the per-villager state used during the pair scan. */

@@ -205,8 +205,22 @@ public final class ScheduleService {
             // hunger+age rewrite uses one setData call.
             int ageBefore = comp.ageDays();
             int ageAfter  = ageBefore + 1;
-            if (after != before || ageAfter != ageBefore) {
-               var nextAnchors = comp.anchors().withHunger(after).withAgeDays(ageAfter);
+            // Stage 18 audit P0 fix: legacy villagers (pre-18a saves)
+            // load with gender=MALE from the codec default. Backfill
+            // half of them to FEMALE via UUID-LSB parity on the first
+            // dawn the mod sees them. The check is idempotent — if a
+            // villager was explicitly female-set, it stays; if its
+            // gender already matches parity, the assignment is a no-op.
+            com.yucareux.townfolk.villager.Gender genderBefore = comp.gender();
+            com.yucareux.townfolk.villager.Gender genderAfter =
+               com.yucareux.townfolk.villager.Gender.fromUuid(v.getUUID());
+            boolean genderMigrate = genderBefore == com.yucareux.townfolk.villager.Gender.MALE
+               && genderAfter == com.yucareux.townfolk.villager.Gender.FEMALE;
+            if (after != before || ageAfter != ageBefore || genderMigrate) {
+               var nextAnchors = comp.anchors()
+                  .withHunger(after)
+                  .withAgeDays(ageAfter)
+                  .withGender(genderMigrate ? genderAfter : genderBefore);
                v.setData(com.yucareux.townfolk.registry.ModRegistries.LLM_VILLAGER.get(),
                   new com.yucareux.townfolk.villager.LlmVillagerComponent(
                      comp.personaSeed(), comp.backstory(), comp.memoryNamespace(),
@@ -217,7 +231,8 @@ public final class ScheduleService {
                comp = v.getData(com.yucareux.townfolk.registry.ModRegistries.LLM_VILLAGER.get());
                com.yucareux.townfolk.diag.VerboseLog.write("DAWN_TICK",
                   "villager=" + nameOf(v) + " hunger=" + before + "→" + after
-                     + " age=" + ageBefore + "→" + ageAfter, "");
+                     + " age=" + ageBefore + "→" + ageAfter
+                     + (genderMigrate ? " gender→FEMALE" : ""), "");
             }
          }
       }
