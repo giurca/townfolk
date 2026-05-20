@@ -145,8 +145,8 @@ public final class ToolDispatcher {
 
       def(new String[]{"give"},             false, false, ctx -> doGive(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
       def(new String[]{"claim_home", "claim home", "claim_bed", "claim bed"},
-                                            false, false, ctx -> doClaimHome(ctx.level, ctx.town, ctx.actor, ctx.self)),
-      def(new String[]{"completed", "done"},false, false, ctx -> doComplete(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+                                            false, false, com.yucareux.townfolk.world.verbs.ClaimHomeVerb::run),
+      def(new String[]{"completed", "done"},false, false, com.yucareux.townfolk.world.verbs.CompleteVerb::run),
       def(new String[]{"sleep"},            false, false, com.yucareux.townfolk.world.verbs.SleepVerb::run),
       def(new String[]{"follow"},           false, false, com.yucareux.townfolk.world.verbs.FollowVerb::run),
       def(new String[]{"craft"},            false, false, ctx -> doCraft(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
@@ -171,11 +171,11 @@ public final class ToolDispatcher {
       def(new String[]{"remember", "commit"},
                                             false, false, com.yucareux.townfolk.world.verbs.RememberVerb::run),
       def(new String[]{"reflex", "standing_order", "rule"},
-                                            false, true,  ctx -> doReflex(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.actionRaw)),
+                                            false, true,  com.yucareux.townfolk.world.verbs.ReflexVerb::run),
       def(new String[]{"forget_parcel", "drop_parcel", "unbind_parcel"},
-                                            false, true,  ctx -> doForgetParcel(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+                                            false, true,  com.yucareux.townfolk.world.verbs.ForgetParcelVerb::run),
       def(new String[]{"forget", "cancel_rule", "drop_reflex"},
-                                            false, true,  ctx -> doForget(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body))
+                                            false, true,  com.yucareux.townfolk.world.verbs.ForgetVerb::run)
    );
 
    public static void execute(ServerLevel level, TownSquareBlockEntity town, Villager actor,
@@ -278,171 +278,13 @@ public final class ToolDispatcher {
 
    // doFollow moved to {@link com.yucareux.townfolk.world.verbs.FollowVerb} (stage 16b.2.a).
 
-   /** Fuzzy-match `what` against the actor's open todos and mark the best one done. */
-   private static void doComplete(ServerLevel level, TownSquareBlockEntity town,
-                                  Villager actor, VillagerEntry self, String what) {
-      com.yucareux.townfolk.villager.LlmVillagerComponent c =
-         actor.getData(com.yucareux.townfolk.registry.ModRegistries.LLM_VILLAGER.get());
-      if (c.todos().isEmpty() || what.isEmpty()) {
-         VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=complete_noop", "what=\"" + what + "\"");
-         return;
-      }
-      String needle = what.toLowerCase(Locale.ROOT);
-      com.yucareux.townfolk.villager.Todo best = null;
-      int bestScore = 0;
-      for (var t : c.todos()) {
-         if (!t.isOpen()) continue;
-         int s = fuzzyOverlap(needle, t.text().toLowerCase(Locale.ROOT));
-         if (s > bestScore) { bestScore = s; best = t; }
-      }
-      if (best == null || bestScore < 3) {
-         VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=complete_no_match",
-            "what=\"" + what + "\" bestScore=" + bestScore);
-         town.getTown().log().add(level.getGameTime(), com.yucareux.townfolk.town.TownLog.Level.INFO,
-            self.name() + " marks something done but I can't find the todo: \"" + what + "\"");
-         return;
-      }
-      var updated = best.withStatus("done");
-      var nextTodos = new java.util.ArrayList<>(c.todos());
-      for (int i = 0; i < nextTodos.size(); i++) {
-         if (nextTodos.get(i).id().equals(best.id())) { nextTodos.set(i, updated); break; }
-      }
-      long day = level.getGameTime() / 24000L;
-      actor.setData(com.yucareux.townfolk.registry.ModRegistries.LLM_VILLAGER.get(),
-         c.withTodos(nextTodos));
-      com.yucareux.townfolk.villager.MemoryStore.write(actor, "action", day, "I finished: " + best.text());
-      VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=completed", "todo=\"" + best.text() + "\"");
-      town.getTown().log().add(level.getGameTime(), com.yucareux.townfolk.town.TownLog.Level.INFO,
-         self.name() + " ✓ completed: " + best.text());
-   }
+   // doComplete moved to {@link com.yucareux.townfolk.world.verbs.CompleteVerb} (16b.2.b).
+   // doClaimHome moved to {@link com.yucareux.townfolk.world.verbs.ClaimHomeVerb} (16b.2.b).
+   // fuzzyOverlap + findBlock now live on
+   // {@link com.yucareux.townfolk.world.verbs.VerbUtils}.
 
-   /** Cheap word-overlap score (case-insensitive). Good enough for fuzzy todo matching. */
-   private static int fuzzyOverlap(String a, String b) {
-      java.util.Set<String> aw = new java.util.HashSet<>(java.util.Arrays.asList(a.split("\\W+")));
-      java.util.Set<String> bw = new java.util.HashSet<>(java.util.Arrays.asList(b.split("\\W+")));
-      aw.remove(""); bw.remove("");
-      // Filter trivial stop-words.
-      // Set.of throws on duplicates — "be" listed twice would crash
-      // the LLM-todo-complete path every time. Stick to a vanilla
-      // HashSet so future careless edits don't bite.
-      java.util.Set<String> stop = new java.util.HashSet<>(java.util.Arrays.asList(
-         "the","a","an","to","of","i","me","my","on","at","and","is","be",
-         "ill","will","for","that","this"));
-      aw.removeAll(stop); bw.removeAll(stop);
-      aw.retainAll(bw);
-      return aw.size();
-   }
-
-   private static void doClaimHome(ServerLevel level, TownSquareBlockEntity town,
-                                   Villager actor, VillagerEntry self) {
-      // Search around the villager AND around the nearest player — whichever the
-      // player just walked the villager to.
-      BlockPos bedPos = findBlock(level, actor.blockPosition(), 6,
-         state -> state.is(net.minecraft.tags.BlockTags.BEDS));
-      if (bedPos == null) {
-         Player p = level.getNearestPlayer(actor, 12.0);
-         if (p != null) {
-            bedPos = findBlock(level, p.blockPosition(), 4,
-               state -> state.is(net.minecraft.tags.BlockTags.BEDS));
-         }
-      }
-      if (bedPos == null) {
-         VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=claim_home_no_bed", "");
-         town.getTown().log().add(level.getGameTime(), com.yucareux.townfolk.town.TownLog.Level.INFO,
-            self.name() + " looked for a bed but didn't find one nearby");
-         return;
-      }
-      actor.getBrain().setMemory(
-         net.minecraft.world.entity.ai.memory.MemoryModuleType.HOME,
-         net.minecraft.core.GlobalPos.of(level.dimension(), bedPos));
-      // Mark as player-confirmed so the [need:home] todo closes properly.
-      com.yucareux.townfolk.villager.LlmVillagerComponent cc =
-         actor.getData(com.yucareux.townfolk.registry.ModRegistries.LLM_VILLAGER.get());
-      actor.setData(com.yucareux.townfolk.registry.ModRegistries.LLM_VILLAGER.get(),
-         cc.withPlayerSetHome(true));
-      VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=home_claimed",
-         "pos=" + bedPos.toShortString());
-      town.getTown().log().add(level.getGameTime(), com.yucareux.townfolk.town.TownLog.Level.INFO,
-         self.name() + " claimed a bed at " + bedPos.toShortString() + " as home");
-   }
-
-   private static BlockPos findBlock(ServerLevel level, BlockPos centre, int radius,
-                                     java.util.function.Predicate<net.minecraft.world.level.block.state.BlockState> pred) {
-      BlockPos.MutableBlockPos cur = new BlockPos.MutableBlockPos();
-      BlockPos best = null;
-      double bestDist = Double.MAX_VALUE;
-      for (int dx = -radius; dx <= radius; dx++) {
-         for (int dy = -radius; dy <= radius; dy++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-               cur.set(centre.getX() + dx, centre.getY() + dy, centre.getZ() + dz);
-               if (!pred.test(level.getBlockState(cur))) continue;
-               double d = cur.distSqr(centre);
-               if (d < bestDist) { bestDist = d; best = cur.immutable(); }
-            }
-         }
-      }
-      return best;
-   }
-
-   // ───── forget_parcel — drop a villager's owned plot ─────
-
-   /** LLM-driven counterpart to the sneak-stake unbind path. Matches by exact
-    *  parcel id first, then by fuzzy substring against the parcel's short
-    *  label so the LLM can write {@code forget_parcel west plot} or
-    *  {@code forget_parcel 8x4}. Cancels any in-flight block task tied to
-    *  the dropped parcel — villager moves on to other parcels next tick. */
-   private static void doForgetParcel(ServerLevel level, TownSquareBlockEntity town,
-                                      Villager actor, VillagerEntry self, String body) {
-      var comp = actor.getData(com.yucareux.townfolk.registry.ModRegistries.LLM_VILLAGER.get());
-      if (comp.parcels().isEmpty()) {
-         ActionFeedback.recordFail(actor.getUUID(), level.getGameTime(),
-            "forget_parcel — I own no land to drop");
-         return;
-      }
-      String needle = body.toLowerCase(Locale.ROOT).trim();
-      com.yucareux.townfolk.villager.FieldRegion match = null;
-      // 1: exact id.
-      for (var p : comp.parcels()) {
-         if (p.id().equals(body)) { match = p; break; }
-      }
-      // 2: fuzzy label (size or direction).
-      if (match == null && !needle.isEmpty()) {
-         for (var p : comp.parcels()) {
-            String label = p.shortLabel(town.getBlockPos()).toLowerCase(Locale.ROOT);
-            if (label.contains(needle)) { match = p; break; }
-         }
-      }
-      // 3: empty body or no match — fail with a description of available parcels.
-      if (match == null) {
-         StringBuilder list = new StringBuilder();
-         for (var p : comp.parcels()) {
-            if (list.length() > 0) list.append(", ");
-            list.append(p.shortLabel(town.getBlockPos())).append(" [id=").append(p.id()).append("]");
-         }
-         ActionFeedback.recordFail(actor.getUUID(), level.getGameTime(),
-            "forget_parcel — no parcel matched \"" + body + "\". Available: " + list);
-         return;
-      }
-      actor.setData(com.yucareux.townfolk.registry.ModRegistries.LLM_VILLAGER.get(),
-         comp.withoutParcel(match.id()));
-      BlockTaskQueue.cancel(actor.getUUID());
-      // Drop any per-parcel plan (crop or animal) keyed on this id —
-      // the registries otherwise leak entries every time a villager
-      // rebuilds a plot.
-      com.yucareux.townfolk.town.CropPlanRegistry.forget(level, match.id());
-      com.yucareux.townfolk.town.AnimalPlanRegistry.forget(level, match.id());
-      long day = level.getGameTime() / 24000L;
-      String label = match.shortLabel(town.getBlockPos());
-      String msg = self.name() + " dropped their claim to " + label;
-      VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=forget_parcel",
-         "id=" + match.id() + " label=" + label);
-      town.getTown().log().add(level.getGameTime(), TownLog.Level.INFO, msg);
-      com.yucareux.townfolk.villager.MemoryStore.write(actor, "parcel", day,
-         "I gave up my claim to the " + label + " plot.");
-      ActionFeedback.recordOk(actor.getUUID(), level.getGameTime(),
-         "dropped parcel " + label);
-   }
-
+   // doForgetParcel moved to {@link com.yucareux.townfolk.world.verbs.ForgetParcelVerb} (16b.2.b).
+   // Stub kept here to avoid breaking the file until a clean delete.
    // ───── crafting (vanilla RecipeManager-backed via RecipeCatalog) ─────
 
    private static void doCraft(ServerLevel level, TownSquareBlockEntity town,
@@ -1771,82 +1613,8 @@ public final class ToolDispatcher {
    // doRemember moved to {@link com.yucareux.townfolk.world.verbs.RememberVerb} (stage 16b.2.a).
 
    // ───── reflex / forget — standing orders ─────
-
-   /** Match either {@code when=<trigger> do=<action>} (preferred) or a
-    *  comma-separated {@code <trigger>, <action>} fallback. Tolerant of
-    *  whitespace and a leading "reflex" / "standing_order" / "rule" word
-    *  which the caller has already trimmed off via actionRaw. */
-   private static final Pattern REFLEX_KV = Pattern.compile(
-      "(?i).*?\\bwhen\\s*=\\s*([^\\s].*?)\\s+do\\s*=\\s*(.+)");
-
-   private static void doReflex(ServerLevel level, TownSquareBlockEntity town,
-                                Villager actor, VillagerEntry self, String actionRaw) {
-      // Strip the verb prefix.
-      String body = actionRaw.replaceFirst("(?i)^(reflex|standing_order|rule)\\b\\s*:?\\s*", "").trim();
-      String trigger = null, action = null;
-
-      Matcher m = REFLEX_KV.matcher(body);
-      if (m.matches()) {
-         trigger = m.group(1).trim();
-         action = m.group(2).trim();
-      } else {
-         // Comma-separated fallback: "after harvest, deposit all wheat".
-         int comma = body.indexOf(',');
-         if (comma > 0) {
-            trigger = body.substring(0, comma).trim();
-            action = body.substring(comma + 1).trim();
-         }
-      }
-      if (trigger == null || action == null || trigger.isEmpty() || action.isEmpty()) {
-         VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=reflex_malformed",
-            "raw=\"" + actionRaw + "\"");
-         town.getTown().log().add(level.getGameTime(), TownLog.Level.INFO,
-            self.name() + " malformed reflex: \"" + actionRaw + "\"");
-         ActionFeedback.recordFail(actor.getUUID(), level.getGameTime(),
-            "reflex — couldn't parse trigger + action from \"" + actionRaw
-               + "\". Expected form: reflex when=<trigger> do=<action>");
-         return;
-      }
-      var result = ReflexService.addReflex(level, actor, trigger, action);
-      if (result.isEmpty()) {
-         town.getTown().log().add(level.getGameTime(), TownLog.Level.INFO,
-            self.name() + " rejected reflex: trigger \"" + trigger + "\" is not recognised");
-         ActionFeedback.recordFail(actor.getUUID(), level.getGameTime(),
-            "reflex — trigger \"" + trigger + "\" not recognised. Valid: after:<verb>, "
-               + "phase:<phase>, inv:>=:<item>:<n>, inv:<=:<item>:<n>");
-         return;
-      }
-      String msg = self.name() + " adopts a standing order: when " + result.get().trigger()
-         + " then " + result.get().action();
-      VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=reflex_added",
-         "id=" + result.get().id() + " when=" + result.get().trigger() + " do=" + result.get().action());
-      town.getTown().log().add(level.getGameTime(), TownLog.Level.INFO, msg);
-      ActionFeedback.recordOk(actor.getUUID(), level.getGameTime(),
-         "standing order set: when " + result.get().trigger() + " then " + result.get().action());
-      com.yucareux.townfolk.villager.MemoryStore.write(actor, "reflex",
-         level.getGameTime() / 24000L,
-         "I gave myself a standing order — when " + result.get().trigger()
-            + ", I now " + result.get().action() + ".");
-   }
-
-   private static void doForget(ServerLevel level, TownSquareBlockEntity town,
-                                Villager actor, VillagerEntry self, String body) {
-      if (body.isEmpty()) {
-         ActionFeedback.recordFail(actor.getUUID(), level.getGameTime(),
-            "forget — needs an id or fuzzy description of the standing order to drop");
-         return;
-      }
-      boolean removed = ReflexService.removeReflex(actor, body);
-      if (!removed) {
-         ActionFeedback.recordFail(actor.getUUID(), level.getGameTime(),
-            "forget — no standing order matches \"" + body + "\"");
-         return;
-      }
-      town.getTown().log().add(level.getGameTime(), TownLog.Level.INFO,
-         self.name() + " drops a standing order matching \"" + body + "\"");
-      ActionFeedback.recordOk(actor.getUUID(), level.getGameTime(),
-         "standing order dropped: \"" + body + "\"");
-   }
+   // doReflex moved to {@link com.yucareux.townfolk.world.verbs.ReflexVerb} (16b.2.b).
+   // doForget moved to {@link com.yucareux.townfolk.world.verbs.ForgetVerb} (16b.2.b).
 
    // doSleep moved to {@link com.yucareux.townfolk.world.verbs.SleepVerb} (stage 16b.2.a).
    // doViolencePlaceholder moved to {@link com.yucareux.townfolk.world.verbs.ViolenceVerb}.
