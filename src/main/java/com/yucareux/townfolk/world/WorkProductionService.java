@@ -37,6 +37,15 @@ public final class WorkProductionService {
     *  busy town of 50 villagers doesn't tax the server. */
    private static final int PRODUCTION_INTERVAL_TICKS = 20 * 15;
 
+   /** Sub-window granularity for staggering (Stage 21d). Outer poll
+    *  fires every {@link #POLL_TICKS}; each villager has a stable
+    *  slot 0..{@link #STAGGER_SLOTS}-1 derived from their UUID and
+    *  only runs in their slot. Net: every villager still runs once
+    *  per {@link #PRODUCTION_INTERVAL_TICKS}, but the work spreads
+    *  across the window instead of bursting at tick % 300 == 0. */
+   private static final int POLL_TICKS = 20;        // 1s
+   private static final int STAGGER_SLOTS = PRODUCTION_INTERVAL_TICKS / POLL_TICKS;
+
    /** Context passed into routine methods. Frees the routine from having to
     *  re-pull every value out of the same handful of objects. */
    public record Ctx(ServerLevel level, TownSquareBlockEntity town,
@@ -103,11 +112,20 @@ public final class WorkProductionService {
    @SubscribeEvent
    public static void onTick(LevelTickEvent.Post event) {
       if (!(event.getLevel() instanceof ServerLevel level)) return;
-      if (level.getGameTime() % PRODUCTION_INTERVAL_TICKS != 0L) return;
+      long now = level.getGameTime();
+      if (now % POLL_TICKS != 0L) return;
+      // Current sub-window slot 0..14. Each villager runs only when
+      // their stable hash-derived slot matches.
+      int currentSlot = (int) Math.floorMod(now / POLL_TICKS, STAGGER_SLOTS);
 
       for (TownSquareBlockEntity town : TownSquareBlockEntity.loadedIn(level)) {
          for (VillagerEntry entry : town.getTown().villagers()) {
             if (!entry.alive()) continue;
+            // Stage 21d: stagger across the 15-slot window via UUID
+            // hash. Cheap, stable, and keeps each villager's tick
+            // budget at exactly one run per PRODUCTION_INTERVAL_TICKS.
+            int villagerSlot = Math.floorMod(entry.uuid().hashCode(), STAGGER_SLOTS);
+            if (villagerSlot != currentSlot) continue;
             if (!(level.getEntity(entry.uuid()) instanceof Villager v)) continue;
             LlmVillagerComponent c = v.getData(ModRegistries.LLM_VILLAGER.get());
             if (c.townSquarePos() == 0L) continue;

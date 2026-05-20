@@ -3,14 +3,19 @@ package com.yucareux.townfolk.town;
 import com.yucareux.townfolk.Townfolk;
 import com.yucareux.townfolk.diag.VerboseLog;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.level.saveddata.SavedData;
 
 /**
@@ -31,6 +36,21 @@ public final class StorageRegistry extends SavedData {
 
    private final Map<Long, StorageConfig> byPos = new LinkedHashMap<>();
 
+   /** Mutation counter. Bumped on every put/forget/touch — invalidates
+    *  the {@link #tagIndex} below so callers always see a fresh view
+    *  within one mutation cycle. Volatile so the index-rebuild thread
+    *  sees writes from the touch-thread without a fence. */
+   private volatile long mutationGen = 0L;
+
+   /** Cached tag → registered-positions reverse index. Lazily rebuilt
+    *  in {@link #tilesForTag} whenever the cached generation lags the
+    *  current {@link #mutationGen}. Stage 21a — kills the
+    *  audit-identified 4M-op-per-meal-window scan in MealService by
+    *  turning each tier check from O(barrels × slots) into
+    *  O(matching barrels). */
+   private record IndexEntry(long gen, Set<Long> positions) {}
+   private final Map<TagKey<Item>, IndexEntry> tagIndex = new ConcurrentHashMap<>();
+
    private StorageRegistry() {}
 
    public static StorageRegistry get(ServerLevel level) {
@@ -44,6 +64,7 @@ public final class StorageRegistry extends SavedData {
       StorageRegistry reg = get(level);
       boolean isNew = !reg.byPos.containsKey(pos.asLong());
       reg.byPos.put(pos.asLong(), config);
+      reg.mutationGen++;
       reg.setDirty();
       VerboseLog.write(isNew ? "STORAGE_REGISTER" : "STORAGE_UPDATE",
          "pos=" + pos.toShortString()
@@ -56,6 +77,7 @@ public final class StorageRegistry extends SavedData {
    public static void forget(ServerLevel level, BlockPos pos) {
       StorageRegistry reg = get(level);
       if (reg.byPos.remove(pos.asLong()) != null) {
+         reg.mutationGen++;
          reg.setDirty();
          VerboseLog.write("STORAGE_FORGET", "pos=" + pos.toShortString(), "");
       }
@@ -145,6 +167,12 @@ public final class StorageRegistry extends SavedData {
       StorageConfig cfg = reg.byPos.get(pos.asLong());
       if (cfg == null) return;        // unregistered container — silently ignore
       cfg.touch(who, gameTime);
+      // Bump mutation gen — touch() is called from every storage-modifying
+      // verb (deposit/withdraw/peek), so this is the cleanest single hook
+      // for invalidating the tag index. Misses player-direct chest edits
+      // (no granular vanilla event), but those are rare and the meal-
+      // window memo cache (21c) covers the staleness window.
+      reg.mutationGen++;
       reg.setDirty();
    }
 
@@ -229,6 +257,54 @@ public final class StorageRegistry extends SavedData {
       if (ticks < 20L * 60) return (ticks / 20L) + "s";
       if (ticks < 24000L)   return (ticks / (20L * 60)) + "m";
       return (ticks / 24000L) + " day(s)";
+   }
+
+   // ───── tag reverse index (Stage 21a) ─────
+
+   /** Return the set of registered container positions that hold at
+    *  least one stack matching {@code tag} right now. Built lazily on
+    *  first query per mutation generation; subsequent queries reuse
+    *  the cached set until the next deposit/withdraw/peek/put/forget
+    *  bumps {@link #mutationGen}.
+    *
+    *  <p>Returns an unmodifiable view — callers can iterate but must
+    *  not mutate. Positions are returned as packed {@code asLong}s;
+    *  unpack with {@link BlockPos#of(long)}. */
+   public static Set<Long> tilesForTag(ServerLevel level, TagKey<Item> tag) {
+      StorageRegistry reg = get(level);
+      long gen = reg.mutationGen;
+      IndexEntry cached = reg.tagIndex.get(tag);
+      if (cached != null && cached.gen == gen) return cached.positions;
+
+      // Rebuild: scan every registered container's live contents and
+      // collect positions where any slot's item matches the tag.
+      Set<Long> positions = new HashSet<>();
+      for (var entry : reg.byPos.entrySet()) {
+         BlockPos pos = BlockPos.of(entry.getKey());
+         var container = com.yucareux.townfolk.town.ContainerAdapters.at(level, pos);
+         if (container == null) continue;
+         for (int i = 0; i < container.getContainerSize(); i++) {
+            var stack = container.getItem(i);
+            if (stack.isEmpty()) continue;
+            if (stack.is(tag)) {
+               positions.add(entry.getKey());
+               break;     // one hit per container is enough
+            }
+         }
+      }
+      Set<Long> immut = Set.copyOf(positions);
+      reg.tagIndex.put(tag, new IndexEntry(gen, immut));
+      return immut;
+   }
+
+   /** Bump the mutation generation manually. Used by callers that
+    *  modified a registered container without going through
+    *  {@link #touch} (e.g. direct programmatic mutations during tests
+    *  or future Create-mod fluid handlers that fill/drain without
+    *  triggering a storage verb). */
+   public static void bumpMutationGen(ServerLevel level) {
+      StorageRegistry reg = get(level);
+      reg.mutationGen++;
    }
 
    // ───── persistence ─────

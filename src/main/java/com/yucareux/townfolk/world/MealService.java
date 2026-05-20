@@ -178,23 +178,40 @@ public final class MealService {
    }
 
    private static FoodHit findBestFoodInTownImpl(ServerLevel level, BlockPos from) {
-      // Tag-driven food search. For each priority tier (top-down),
-      // scan every registered town barrel for ANY item belonging to
-      // the tier's tag. First hit at the highest tier wins. Modded
-      // food joins via JSON tag membership — no code change here.
+      // Stage 21b: tag-driven food search now consults the
+      // {@link com.yucareux.townfolk.town.StorageRegistry#tilesForTag}
+      // reverse index instead of walking every registered barrel ×
+      // every slot. The index returns ONLY barrels currently holding
+      // at least one tier-matching item — typically a tiny fraction
+      // of the registered set.
+      //
+      // Within a matched barrel we still inner-loop slots to pull the
+      // first matching ItemStack (need the count + item id), but the
+      // outer scan is now O(matching barrels) not O(all barrels).
+      // At 50 villagers × 50 barrels × 4 tiers × 15 polls / window
+      // that's the audit-flagged 4M-op-per-meal-window drop to a
+      // handful of operations per first-poll, with the rest of the
+      // window short-circuiting via the memo cache (21c).
       for (FoodTier tier : FOOD_TIERS) {
-         for (var entry : com.yucareux.townfolk.town.StorageRegistry.entries(level)) {
-            net.minecraft.core.BlockPos pos =
-               net.minecraft.core.BlockPos.of(entry.getKey());
-            Container c = com.yucareux.townfolk.town.ContainerAdapters.at(level, pos);
-            if (c == null) continue;
-            for (int i = 0; i < c.getContainerSize(); i++) {
-               ItemStack s = c.getItem(i);
-               if (s.isEmpty()) continue;
-               if (!s.is(tier.tag())) continue;
-               ResourceLocation rl = BuiltInRegistries.ITEM.getKey(s.getItem());
-               return new FoodHit(pos, c, rl.toString(), tier.nutrition());
-            }
+         var positions = com.yucareux.townfolk.town.StorageRegistry
+            .tilesForTag(level, tier.tag());
+         if (positions.isEmpty()) continue;
+         BlockPos best = null;
+         double bestDistSq = Double.MAX_VALUE;
+         for (Long packed : positions) {
+            BlockPos pos = BlockPos.of(packed);
+            double d = pos.distSqr(from);
+            if (d < bestDistSq) { bestDistSq = d; best = pos; }
+         }
+         if (best == null) continue;
+         Container c = com.yucareux.townfolk.town.ContainerAdapters.at(level, best);
+         if (c == null) continue;
+         for (int i = 0; i < c.getContainerSize(); i++) {
+            ItemStack s = c.getItem(i);
+            if (s.isEmpty()) continue;
+            if (!s.is(tier.tag())) continue;
+            ResourceLocation rl = BuiltInRegistries.ITEM.getKey(s.getItem());
+            return new FoodHit(best, c, rl.toString(), tier.nutrition());
          }
       }
       return null;
@@ -223,6 +240,14 @@ public final class MealService {
       ItemStack one = c.removeItem(slot, 1);
       if (one.isEmpty()) return;
       c.setChanged();
+      // Stage 21c: bump the storage mutation generation so the tag
+      // reverse index (21a) re-checks this barrel on its next query.
+      // Without this, the index would still report "barrel X has
+      // tier-Y food" for the rest of the meal window after the
+      // barrel's last matching stack was consumed — sending the next
+      // hungry villager on a wasted walk that returns null at the
+      // inner content check.
+      com.yucareux.townfolk.town.StorageRegistry.bumpMutationGen(level);
 
       int before = comp.hunger();
       int after  = Math.min(100, before + hit.hungerValue);
