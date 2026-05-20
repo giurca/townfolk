@@ -192,12 +192,13 @@ public final class TownAdminScreen extends Screen {
    /** Grid scroll for the Tasks tab (rows). Replaces the old
     *  list-pixel tasksScrollOffset field that became dead when the
     *  Tasks tab moved from list rows to grid tiles. */
-   private int tasksGridScrollRows = 0;
+   /** Pkg-private — {@link TasksRenderer} reads + clamps. */
+   int tasksGridScrollRows = 0;
 
    /** Selected (owner-uuid, todo-id) for the popup. Encoded as
     *  "uuid|todoId" since we need both to send TODO_COMPLETE /
     *  TODO_ABANDON. Null = no popup. */
-   private String selectedTodoKey = null;
+   String selectedTodoKey = null;
    private int refreshTimer;
 
    private EditBox spawnNameBox;
@@ -388,11 +389,12 @@ public final class TownAdminScreen extends Screen {
 
    // ----- Villagers tab -----
 
-   private record TaskRow(TownStateUpdatePayload.VillagerSummary owner,
-                          TownStateUpdatePayload.TodoSummary todo) {}
+   /** Pkg-private — {@link TasksRenderer} consumes these rows. */
+   record TaskRow(TownStateUpdatePayload.VillagerSummary owner,
+                  TownStateUpdatePayload.TodoSummary todo) {}
 
    /** All open todos across all villagers, owner-grouped order, newest day first inside each. */
-   private List<TaskRow> collectOpenTasks() {
+   List<TaskRow> collectOpenTasks() {
       List<TaskRow> rows = new java.util.ArrayList<>();
       for (var v : this.state.villagers()) {
          for (var t : v.todos()) {
@@ -425,245 +427,7 @@ public final class TownAdminScreen extends Screen {
    // Trade tab render + hit-test live in {@link TradeRenderer} (15b.4.c).
 
 
-   private static final int TASK_CELL_W = 110;
-   private static final int TASK_CELL_H = 72;
-   private static final int TASK_CELL_GAP = 8;
-   /** Standardised across grid-style tabs (Resources / Parcels / Trade /
-    *  Tasks) so the visual rhythm — header on one line, generous gap,
-    *  then grid — stays consistent. */
-   private static final int TASK_GRID_TOP = 26;
-
-   /** Cached fallback icon for tasks that don't parse to a known need. */
-   private net.minecraft.world.item.ItemStack taskFallbackIcon;
-
-   private void renderTasksTab(GuiGraphics graphics, int paneL, int paneR,
-                                int top, int bottom, int mouseX, int mouseY) {
-      int innerL = paneL + PADDING;
-      int innerR = paneR - PADDING;
-
-      List<TaskRow> rows = collectOpenTasks();
-      int contentTop = top + 10;
-      UiText.heading(graphics, this.font,
-         "Open tasks across the town (" + rows.size() + ")",
-         innerL, contentTop);
-      if (rows.isEmpty()) {
-         UiText.faint(graphics, this.font,
-            "(no open commitments — nobody owes anybody anything)",
-            innerL, contentTop + 14);
-         return;
-      }
-
-      int gridTop = top + TASK_GRID_TOP;
-      int gridBot = bottom - 6;
-      int gridW = innerR - innerL;
-      int cols  = Math.max(1, (gridW + TASK_CELL_GAP) / (TASK_CELL_W + TASK_CELL_GAP));
-      int gridUsed = cols * TASK_CELL_W + (cols - 1) * TASK_CELL_GAP;
-      int gridX0   = innerL + (gridW - gridUsed) / 2;
-
-      int totalRows = (rows.size() + cols - 1) / cols;
-      int visibleRows = Math.max(1, (gridBot - gridTop + TASK_CELL_GAP) / (TASK_CELL_H + TASK_CELL_GAP));
-      int maxScrollRow = Math.max(0, totalRows - visibleRows);
-      if (this.tasksGridScrollRows > maxScrollRow) this.tasksGridScrollRows = maxScrollRow;
-      int scrollPx = this.tasksGridScrollRows * (TASK_CELL_H + TASK_CELL_GAP);
-
-      scaledScissor(graphics, innerL, gridTop, innerR, gridBot);
-      int i = 0;
-      for (TaskRow r : rows) {
-         int row = i / cols;
-         int col = i % cols;
-         int cx = gridX0 + col * (TASK_CELL_W + TASK_CELL_GAP);
-         int cy = gridTop + row * (TASK_CELL_H + TASK_CELL_GAP) - scrollPx;
-         if (cy > gridBot) break;
-         if (cy + TASK_CELL_H < gridTop) { i++; continue; }
-         renderTaskCell(graphics, r, cx, cy, mouseX, mouseY);
-         i++;
-      }
-      graphics.disableScissor();
-
-      if (this.selectedTodoKey != null) {
-         renderTaskPopup(graphics, paneL, paneR, top, bottom);
-      }
-   }
-
-   /** Render one open todo as a tile. Tile content:
-    *  <ul>
-    *    <li>top-left: owner name (truncated, accent)
-    *    <li>top-right: day created (faint)
-    *    <li>centre: derived icon (need-tag → item lookup, else paper)
-    *    <li>centred under icon: 2 lines of todo text, truncated
-    *  </ul> */
-   private void renderTaskCell(GuiGraphics g, TaskRow r, int x, int y, int mouseX, int mouseY) {
-      boolean hovered = mouseX >= x && mouseX < x + TASK_CELL_W
-                     && mouseY >= y && mouseY < y + TASK_CELL_H;
-      String key = r.owner().uuid() + "|" + r.todo().id();
-      boolean selected = key.equals(this.selectedTodoKey);
-      int bg = (hovered || selected) ? TAB_ACTIVE_BG : ROW_BG;
-      g.fill(x, y, x + TASK_CELL_W, y + TASK_CELL_H, bg);
-      g.fill(x, y + TASK_CELL_H, x + TASK_CELL_W, y + TASK_CELL_H + 1, PANEL_BORDER);
-
-      // Owner top-left.
-      String ownerClip = UiText.truncate(this.font, r.owner().name(), TASK_CELL_W - 30);
-      g.drawString(this.font, ownerClip, x + 4, y + 3, FG_ACCENT, true);
-
-      // Day top-right.
-      String day = "d" + r.todo().createdDay();
-      int dw = this.font.width(day);
-      g.drawString(this.font, day, x + TASK_CELL_W - dw - 4, y + 3, FG_FAINT, true);
-
-      // Icon derived from need-tag prefix; falls back to paper.
-      var icon = iconForTodo(r.todo().text());
-      g.renderItem(icon, x + (TASK_CELL_W - 16) / 2, y + 14);
-
-      // Two-line truncated body — strip the [need:X] prefix for readability.
-      String body = stripNeedPrefix(r.todo().text());
-      var lines = this.font.split(Component.literal(body), TASK_CELL_W - 8);
-      int bodyY = y + 34;
-      for (int li = 0; li < Math.min(3, lines.size()); li++) {
-         var line = lines.get(li);
-         int lw = this.font.width(line);
-         g.drawString(this.font, line,
-            x + (TASK_CELL_W - lw) / 2, bodyY + li * 10, UiTheme.BODY, true);
-      }
-   }
-
-   private static String stripNeedPrefix(String text) {
-      if (text == null) return "";
-      if (text.startsWith("[need:")) {
-         int end = text.indexOf("] ");
-         if (end >= 0) return text.substring(end + 2);
-      }
-      return text;
-   }
-
-   /** Map a todo's [need:X] prefix to an item icon. Returns a paper
-    *  stack as the universal fallback so every tile gets an icon. */
-   private net.minecraft.world.item.ItemStack iconForTodo(String text) {
-      if (this.taskFallbackIcon == null) {
-         this.taskFallbackIcon = new net.minecraft.world.item.ItemStack(
-            net.minecraft.world.item.Items.PAPER);
-      }
-      if (text == null || !text.startsWith("[need:")) return this.taskFallbackIcon;
-      int end = text.indexOf("] ");
-      if (end < 0) return this.taskFallbackIcon;
-      String need = text.substring(6, end);
-      // Strip a "barrel_for_" prefix → leave the item id.
-      if (need.startsWith("barrel_for_")) need = need.substring("barrel_for_".length());
-      // Map task-id "tool" suffixes to their tool items.
-      String itemId = switch (need) {
-         case "hoe", "seeds_for_till"            -> "minecraft:wooden_hoe";
-         case "seeds"                             -> "minecraft:wheat_seeds";
-         case "shears", "shear_sheep_tool"       -> "minecraft:shears";
-         case "milk_cow_tool"                     -> "minecraft:bucket";
-         default                                  -> need.contains(":") ? need : "minecraft:" + need;
-      };
-      return stackForItemId(itemId);
-   }
-
-   private TaskRow findTodoByKey(String key) {
-      if (key == null) return null;
-      int bar = key.indexOf('|');
-      if (bar < 0) return null;
-      UUID ownerId; try { ownerId = UUID.fromString(key.substring(0, bar)); }
-      catch (IllegalArgumentException ex) { return null; }
-      String todoId = key.substring(bar + 1);
-      for (TaskRow r : collectOpenTasks()) {
-         if (r.owner().uuid().equals(ownerId) && todoId.equals(r.todo().id())) return r;
-      }
-      return null;
-   }
-
-   private TaskRow taskAtPoint(double mouseX, double mouseY) {
-      int paneL = panelLeft();
-      int paneR = panelRight();
-      int top   = panelTop() + 34;
-      int bottom = panelBottom() - PADDING;
-      int innerL = paneL + UiTheme.PADDING;
-      int innerR = paneR - UiTheme.PADDING;
-      int gridTop = top + TASK_GRID_TOP;
-      int gridBot = bottom - 6;
-      if (mouseX < innerL || mouseX > innerR || mouseY < gridTop || mouseY > gridBot) return null;
-
-      var rows = collectOpenTasks();
-      if (rows.isEmpty()) return null;
-      int gridW = innerR - innerL;
-      int cols  = Math.max(1, (gridW + TASK_CELL_GAP) / (TASK_CELL_W + TASK_CELL_GAP));
-      int gridUsed = cols * TASK_CELL_W + (cols - 1) * TASK_CELL_GAP;
-      int gridX0   = innerL + (gridW - gridUsed) / 2;
-      int scrollPx = this.tasksGridScrollRows * (TASK_CELL_H + TASK_CELL_GAP);
-      for (int i = 0; i < rows.size(); i++) {
-         int row = i / cols;
-         int col = i % cols;
-         int cx = gridX0 + col * (TASK_CELL_W + TASK_CELL_GAP);
-         int cy = gridTop + row * (TASK_CELL_H + TASK_CELL_GAP) - scrollPx;
-         if (mouseX >= cx && mouseX < cx + TASK_CELL_W
-             && mouseY >= cy && mouseY < cy + TASK_CELL_H) {
-            return rows.get(i);
-         }
-      }
-      return null;
-   }
-
-   private void renderTaskPopup(GuiGraphics g, int paneL, int paneR, int top, int bottom) {
-      var r = findTodoByKey(this.selectedTodoKey);
-      if (r == null) { this.selectedTodoKey = null; return; }
-
-      int innerL = paneL + UiTheme.PADDING;
-      int innerR = paneR - UiTheme.PADDING;
-      int popW = Math.min(380, innerR - innerL - 40);
-      int popH = 180;
-      int popX = (innerL + innerR - popW) / 2;
-      int popY = (top + bottom - popH) / 2;
-
-      g.fill(paneL, top, paneR, bottom, 0xC0000000);
-      g.fill(popX, popY, popX + popW, popY + popH, PANEL_BG);
-      g.fill(popX - 1, popY - 1, popX + popW + 1, popY, PANEL_BORDER);
-      g.fill(popX - 1, popY + popH, popX + popW + 1, popY + popH + 1, PANEL_BORDER);
-      g.fill(popX - 1, popY, popX, popY + popH, PANEL_BORDER);
-      g.fill(popX + popW, popY, popX + popW + 1, popY + popH, PANEL_BORDER);
-
-      int x = popX + 14;
-      int y = popY + 12;
-
-      UiText.heading(g, this.font,
-         r.owner().name() + " · day " + r.todo().createdDay(), x, y);
-      y += 14;
-
-      // Icon + counterparty.
-      g.renderItem(iconForTodo(r.todo().text()), x, y);
-      String cp = r.todo().counterparty();
-      g.drawString(this.font, "Owed to: " + (cp == null || cp.isBlank() ? "—" : cp),
-         x + 22, y + 4, FG_PRIMARY, true);
-      y += 24;
-
-      // Full body, wrapped.
-      String body = stripNeedPrefix(r.todo().text());
-      for (var line : this.font.split(Component.literal(body), popW - 28)) {
-         if (y > popY + popH - 40) break;
-         g.drawString(this.font, line, x, y, FG_PRIMARY, true);
-         y += 10;
-      }
-
-      int btnY = popY + popH - 24;
-      TradeRenderer.drawButton(g, this.font, popX + 14, btnY, 110, "Mark done", true);
-      TradeRenderer.drawButton(g, this.font, popX + popW - 14 - 80, btnY, 80, "Close", false);
-   }
-
-   private String hitTestTaskPopupButton(double mouseX, double mouseY,
-                                          int paneL, int paneR, int top, int bottom) {
-      int innerL = paneL + UiTheme.PADDING;
-      int innerR = paneR - UiTheme.PADDING;
-      int popW = Math.min(380, innerR - innerL - 40);
-      int popH = 180;
-      int popX = (innerL + innerR - popW) / 2;
-      int popY = (top + bottom - popH) / 2;
-      int btnY = popY + popH - 24;
-      if (mouseY < btnY || mouseY >= btnY + 18) return null;
-      int doneX = popX + 14;
-      if (mouseX >= doneX && mouseX < doneX + 110) return "done";
-      int closeX = popX + popW - 14 - 80;
-      if (mouseX >= closeX && mouseX < closeX + 80) return "close";
-      return null;
-   }
+   // Tasks tab render + popup + grid hit-test live in {@link TasksRenderer} (15b.4.f).
 
    /** init() and render() use slightly different {@code top} reference
     *  values — init's is {@code panelTop+34}, render's is
@@ -1243,9 +1007,9 @@ public final class TownAdminScreen extends Screen {
             int contentBottom = paneB2 - PADDING;
 
             if (this.selectedTodoKey != null) {
-               String btn = hitTestTaskPopupButton(mouseX, mouseY, paneL, paneR2,
+               String btn = TasksRenderer.hitTestPopupButton(mouseX, mouseY, paneL, paneR2,
                   contentTop, contentBottom);
-               var r = findTodoByKey(this.selectedTodoKey);
+               var r = TasksRenderer.findTodoByKey(this, this.selectedTodoKey);
                if ("done".equals(btn) && r != null) {
                   PacketDistributor.sendToServer(
                      AdminActionPayload.todoComplete(townPos(), r.owner().uuid(), r.todo().id()));
@@ -1260,7 +1024,8 @@ public final class TownAdminScreen extends Screen {
                return true;
             }
 
-            var hit = taskAtPoint(mouseX, mouseY);
+            var hit = TasksRenderer.taskAtPoint(this, mouseX, mouseY,
+               panelLeft(), panelRight(), panelTop() + 34, panelBottom() - PADDING);
             if (hit != null) {
                this.selectedTodoKey = hit.owner().uuid() + "|" + hit.todo().id();
                return true;
@@ -1544,7 +1309,7 @@ public final class TownAdminScreen extends Screen {
                case RESOURCES -> renderResourcesTab(graphics, l, r, contentTop, contentBottom, lmX, lmY);
                case PARCELS -> ParcelsRenderer.render(this, graphics, l, r, contentTop, contentBottom, lmX, lmY);
                case TRADE -> TradeRenderer.render(this, graphics, l, r, contentTop, contentBottom);
-               case TASKS -> renderTasksTab(graphics, l, r, contentTop, contentBottom, mouseX, mouseY);
+               case TASKS -> TasksRenderer.render(this, graphics, l, r, contentTop, contentBottom, mouseX, mouseY);
                case LOG -> LogRenderer.render(this, graphics, l, r, contentTop, contentBottom);
             }
          }
