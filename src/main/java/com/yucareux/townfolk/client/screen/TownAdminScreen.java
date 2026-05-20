@@ -229,6 +229,17 @@ public final class TownAdminScreen extends Screen {
       rebuildAdminWidgets();
    }
 
+   /** Font accessor for sibling-package section renderers. The
+    *  inherited {@code font} field is {@code protected} (declared on
+    *  net.minecraft Screen), which means a class in our package that
+    *  is NOT a subclass of Screen can't reach it. This getter is the
+    *  single bridge. Package-private. */
+   net.minecraft.client.gui.Font font() { return this.font; }
+
+   /** Minecraft instance — needed by sections that read mouse coords
+    *  via {@code minecraft.mouseHandler.xpos()}. */
+   net.minecraft.client.Minecraft minecraft() { return this.minecraft; }
+
    /** Package-private from Stage 15b.2 so section renderers in the
     *  same package can resolve a villager UUID without reaching
     *  through reflection. */
@@ -1108,14 +1119,6 @@ public final class TownAdminScreen extends Screen {
       return new int[]{cardL, cardT, cardW, cardH};
    }
 
-   /** Reserved Y bands inside VILLAGER_DETAIL mode. The header always
-    *  occupies the first DETAIL_HEADER_H pixels of the content area;
-    *  the tab strip sits just under it; tab body fills the rest above
-    *  the footer button row. */
-   private static final int DETAIL_HEADER_H = 56;
-   private static final int DETAIL_TAB_STRIP_H = 18;
-   private static final int DETAIL_FOOTER_H = 26;
-
    private void initVillagerDetailWidgets(int paneL, int paneR, int top, int bottom) {
       Optional<TownStateUpdatePayload.VillagerSummary> match = findVillager(this.selectedVillager);
       if (match.isEmpty()) {
@@ -1129,8 +1132,9 @@ public final class TownAdminScreen extends Screen {
       int width  = innerR - innerL;
 
       // Body / footer Y coordinates derived from the reserved bands.
-      int tabBodyTop = top + DETAIL_HEADER_H + DETAIL_TAB_STRIP_H + 4;
-      int tabBodyBottom = bottom - DETAIL_FOOTER_H;
+      int tabBodyTop = top + VillagerDetailRenderer.DETAIL_HEADER_H
+                          + VillagerDetailRenderer.DETAIL_TAB_STRIP_H + 4;
+      int tabBodyBottom = bottom - VillagerDetailRenderer.DETAIL_FOOTER_H;
 
       // ── Footer (always visible) ───────────────────────────────────
       // Left: Back button (returns to Villagers grid).
@@ -1224,7 +1228,7 @@ public final class TownAdminScreen extends Screen {
       // the rendered pin rows in renderDetailMemoriesBody — Y math must
       // match. The render draws a "Pinned facts (N/100)" header line
       // before the first pin row, so we skip 12 px to match.
-      int listTop = top + DETAIL_MEMORIES_LIST_TOP;
+      int listTop = top + VillagerDetailRenderer.DETAIL_MEMORIES_LIST_TOP;
       int rowH = 22;
       int y = listTop - this.detailTabScroll;
       y += 12;                  // skip "Pinned facts (N/100)" section header
@@ -1282,11 +1286,6 @@ public final class TownAdminScreen extends Screen {
          PacketDistributor.sendToServer(AdminActionPayload.open(townPos()))
       ).bounds(innerL + 128, top + 14, 120, 20).build());
    }
-
-   /** Y offset inside the Memories tab where the scrollable list
-    *  starts. Header band (beliefs preview + stats line) takes the
-    *  first DETAIL_MEMORIES_LIST_TOP pixels. */
-   private static final int DETAIL_MEMORIES_LIST_TOP = 60;
 
    // ----- Memories view -----
 
@@ -1586,7 +1585,7 @@ public final class TownAdminScreen extends Screen {
 
       // ── Villager detail: tab-strip click switches tabs. ──
       if (this.mode == Mode.VILLAGER_DETAIL) {
-         DetailTab clickedTab = hitTestDetailTabs(mouseX, mouseY);
+         DetailTab clickedTab = VillagerDetailRenderer.hitTestTabs(mouseX, mouseY);
          if (clickedTab != null && clickedTab != this.detailTab) {
             this.detailTab = clickedTab;
             this.detailTabScroll = 0;
@@ -1595,7 +1594,7 @@ public final class TownAdminScreen extends Screen {
          }
          // Detail Parcels tab — click a row to open its planner.
          if (this.detailTab == DetailTab.PARCELS) {
-            String parcelId = hitTestDetailParcelRow(mouseX, mouseY);
+            String parcelId = VillagerDetailRenderer.hitTestParcelRow(mouseX, mouseY);
             if (parcelId != null) {
                var p = findParcel(parcelId);
                if (p != null) {
@@ -1806,7 +1805,7 @@ public final class TownAdminScreen extends Screen {
             }
          }
          case SPAWN_FORM -> renderSpawnForm(graphics, l, r, t + headerH + 16, b - PADDING, mouseX, mouseY);
-         case VILLAGER_DETAIL -> renderVillagerDetail(graphics, l, r, t + headerH + 16, b - PADDING, mouseX, mouseY);
+         case VILLAGER_DETAIL -> VillagerDetailRenderer.render(this, graphics, l, r, t + headerH + 16, b - PADDING, mouseX, mouseY);
          case MEMORIES -> renderMemories(graphics, l, r, t + headerH + 16, b - PADDING);
          case BELIEFS_FULL -> renderBeliefsFull(graphics, l, r, t + headerH + 16, b - PADDING);
          case VILLAGER_LOG -> renderVillagerLog(graphics, l, r, t + headerH + 16, b - PADDING);
@@ -3140,381 +3139,9 @@ public final class TownAdminScreen extends Screen {
       g.drawString(this.font, label, x + (w - lw) / 2, y + 5, fg, true);
    }
 
-   private void renderVillagerDetail(GuiGraphics graphics, int paneL, int paneR, int top, int bottom,
-                                      int mouseX, int mouseY) {
-      Optional<TownStateUpdatePayload.VillagerSummary> match = findVillager(this.selectedVillager);
-      if (match.isEmpty()) return;
-      TownStateUpdatePayload.VillagerSummary v = match.get();
-      int innerL = paneL + PADDING;
-      int innerR = paneR - PADDING;
-
-      // ── 1. Persistent header (always visible) ──
-      renderDetailHeader(graphics, v, innerL, innerR, top);
-
-      // ── 2. Tab strip ──
-      int tabsY = top + DETAIL_HEADER_H;
-      renderDetailTabStrip(graphics, innerL, innerR, tabsY, mouseX, mouseY);
-
-      // ── 3. Tab body ──
-      int bodyTop = tabsY + DETAIL_TAB_STRIP_H + 4;
-      int bodyBottom = bottom - DETAIL_FOOTER_H;
-      switch (this.detailTab) {
-         case OVERVIEW      -> renderDetailOverviewBody(graphics, v, innerL, innerR, bodyTop, bodyBottom);
-         case BACKSTORY     -> renderDetailBackstoryBody(graphics, v, innerL, innerR, bodyTop, bodyBottom);
-         case MEMORIES      -> renderDetailMemoriesBody(graphics, v, innerL, innerR, bodyTop, bodyBottom);
-         case TODOS         -> renderDetailTodosBody(graphics, v, innerL, innerR, bodyTop, bodyBottom);
-         case PARCELS       -> renderDetailParcelsBody(graphics, v, innerL, innerR, bodyTop, bodyBottom);
-         case RELATIONSHIPS -> renderDetailRelationshipsBody(graphics, v, innerL, innerR, bodyTop, bodyBottom);
-         case ACTIONS       -> renderDetailActionsBody(graphics, v, innerL, innerR, bodyTop, bodyBottom);
-      }
-   }
-
-   /** Persistent header: profession icon + name, status pills,
-    *  HP + Hunger bars, LLM cost summary on the right. */
-   private void renderDetailHeader(GuiGraphics g, TownStateUpdatePayload.VillagerSummary v,
-                                    int innerL, int innerR, int top) {
-      // Profession icon (16×16) on the left, name beside it.
-      g.renderItem(iconForProfession(v.profession()), innerL, top);
-      String name = v.name() + (v.alive() ? "" : " ✝");
-      g.drawString(this.font,
-         Component.literal(name).withStyle(ChatFormatting.GOLD),
-         innerL + 22, top + 2, FG_ACCENT, true);
-      String profLine = (v.profession() == null || v.profession().isBlank() || "none".equals(v.profession())
-                       ? "(unemployed)" : v.profession())
-                     + (v.role() == null || v.role().isBlank() || "resident".equals(v.role())
-                        ? "" : " · " + v.role());
-      g.drawString(this.font, profLine, innerL + 22, top + 12, FG_DIM, true);
-
-      // Status pills row at top + 22 — short, dense.
-      int pillX = innerL + 22;
-      pillX = drawStatusPill(g, pillX, top + 22, prettifyActivity(v.activity()), UiTheme.FAINT);
-      if (v.playerSetHome()) pillX = drawStatusPill(g, pillX, top + 22, "⌂ home", FG_DIM);
-      if (v.playerSetJob())  pillX = drawStatusPill(g, pillX, top + 22, "⚒ job",  FG_DIM);
-      if (v.hunger() < 50)   pillX = drawStatusPill(g, pillX, top + 22, "hungry", 0xFFD55050);
-
-      // Vitals on the right — HP bar, hunger bar, label stacked vertically.
-      int vBarW = 80;
-      int vBarX = innerR - vBarW;
-      int hpY = top + 2;
-      int hgY = top + 12;
-      UiBar.draw(g, vBarX, hpY, vBarW, 5, v.health(), v.maxHealth());
-      g.drawString(this.font, String.format(Locale.ROOT, "HP %.0f/%.0f", v.health(), v.maxHealth()),
-         vBarX - this.font.width("HP 99/99") - 6, hpY - 1, FG_FAINT, true);
-      int hungerFill = (int) Math.round(vBarW * (v.hunger() / 100.0));
-      int hungerColor = v.hunger() >= 70 ? 0xFF6FA445
-                       : v.hunger() >= 40 ? 0xFFE0B040
-                       :                    0xFFD55050;
-      g.fill(vBarX, hgY, vBarX + vBarW, hgY + 5, 0xFF2A1F15);
-      g.fill(vBarX, hgY, vBarX + hungerFill, hgY + 5, hungerColor);
-      g.drawString(this.font, "Hunger " + v.hunger() + "/100",
-         vBarX - this.font.width("Hunger 100/100") - 6, hgY - 1, FG_FAINT, true);
-      String metric = String.format(Locale.ROOT,
-         "%d calls • %d+%d tok • $%.4f", v.llmCalls(),
-         v.inputTokens(), v.outputTokens(), v.estCostUsd());
-      g.drawString(this.font, metric, innerR - this.font.width(metric), top + 22, FG_FAINT, true);
-
-      // Underline under the header band.
-      g.fill(innerL, top + DETAIL_HEADER_H - 4, innerR, top + DETAIL_HEADER_H - 3, PANEL_BORDER);
-   }
-
-   /** Status pill — a tiny labelled chip used by the header. Returns
-    *  the next X cursor so callers can chain pills horizontally. */
-   private int drawStatusPill(GuiGraphics g, int x, int y, String text, int fg) {
-      int w = this.font.width(text) + 8;
-      g.fill(x, y, x + w, y + 11, 0x802A1F15);
-      g.drawString(this.font, text, x + 4, y + 2, fg, true);
-      return x + w + 4;
-   }
-
-   /** Draw + hit-test the tab strip. Stores per-tab x rects so
-    *  mouseClicked can map clicks back to the right tab. */
-   private final java.util.EnumMap<DetailTab, int[]> detailTabRects = new java.util.EnumMap<>(DetailTab.class);
-   private void renderDetailTabStrip(GuiGraphics g, int innerL, int innerR, int y,
-                                      int mouseX, int mouseY) {
-      DetailTab[] tabs = DetailTab.values();
-      int cx = innerL;
-      for (DetailTab t : tabs) {
-         String label = tabLabel(t);
-         int w = this.font.width(label) + 12;
-         boolean active = t == this.detailTab;
-         boolean hovered = mouseX >= cx && mouseX < cx + w && mouseY >= y && mouseY < y + DETAIL_TAB_STRIP_H;
-         int bg = active ? TAB_ACTIVE_BG : (hovered ? ROW_BG : 0x00000000);
-         if (bg != 0) g.fill(cx, y, cx + w, y + DETAIL_TAB_STRIP_H, bg);
-         int textColor = active ? FG_ACCENT : (hovered ? FG_PRIMARY : FG_DIM);
-         g.drawString(this.font, label, cx + 6, y + 5, textColor, true);
-         if (active) g.fill(cx, y + DETAIL_TAB_STRIP_H, cx + w, y + DETAIL_TAB_STRIP_H + 1, FG_ACCENT);
-         detailTabRects.put(t, new int[]{cx, y, w, DETAIL_TAB_STRIP_H});
-         cx += w + 2;
-      }
-   }
-
-   private static String tabLabel(DetailTab t) {
-      return switch (t) {
-         case OVERVIEW      -> "Overview";
-         case BACKSTORY     -> "Backstory";
-         case MEMORIES      -> "Memories";
-         case TODOS         -> "Todos";
-         case PARCELS       -> "Parcels";
-         case RELATIONSHIPS -> "Relations";
-         case ACTIONS       -> "Actions";
-      };
-   }
-
-   /** Hit-test the tab strip. Returns the clicked tab or null. */
-   private DetailTab hitTestDetailTabs(double mouseX, double mouseY) {
-      for (var e : detailTabRects.entrySet()) {
-         int[] r = e.getValue();
-         if (mouseX >= r[0] && mouseX < r[0] + r[2]
-             && mouseY >= r[1] && mouseY < r[1] + r[3]) {
-            return e.getKey();
-         }
-      }
-      return null;
-   }
-
-   // ──────────────────── Tab bodies ────────────────────
-
-   private void renderDetailOverviewBody(GuiGraphics g, TownStateUpdatePayload.VillagerSummary v,
-                                          int innerL, int innerR, int top, int bottom) {
-      int y = top;
-      // Quick-look: parcels owned + todos open + memories + last day's
-      // schedule keyed off the activity status.
-      int openTodos = (int) v.todos().stream().filter(t -> "open".equals(t.status())).count();
-      int plantParcels = 0, animalParcels = 0;
-      // We don't carry per-villager parcel ids in VillagerSummary — pull
-      // from the top-level parcels list and match by owner.
-      for (var p : this.state.parcels()) {
-         if (v.uuid().equals(p.ownerUuid())) {
-            if ("PLANT".equals(p.type())) plantParcels++;
-            else if ("ANIMAL".equals(p.type())) animalParcels++;
-         }
-      }
-
-      g.drawString(this.font, "At a glance", innerL, y, FG_DIM, true);
-      y += 14;
-      g.drawString(this.font,
-         "• Parcels: " + (plantParcels + animalParcels)
-            + " (" + plantParcels + " plant · " + animalParcels + " animal)",
-         innerL, y, FG_PRIMARY, true); y += 11;
-      g.drawString(this.font,
-         "• Open todos: " + openTodos,
-         innerL, y, openTodos > 0 ? FG_ERROR : FG_PRIMARY, true); y += 11;
-      g.drawString(this.font,
-         "• Memories: " + v.memoryCount()
-            + " (last compacted day " + v.lastCompactedDay() + ")",
-         innerL, y, FG_PRIMARY, true); y += 11;
-      g.drawString(this.font,
-         "• Pinned facts: " + v.pinnedFacts().size() + " / 100",
-         innerL, y, FG_PRIMARY, true); y += 11;
-      g.drawString(this.font,
-         "• Inventory: " + v.inventory().size() + " stacks",
-         innerL, y, FG_PRIMARY, true); y += 14;
-
-      // Inventory preview — first few stacks rendered as item icons + counts.
-      g.drawString(this.font, "Carrying", innerL, y, FG_DIM, true);
-      y += 12;
-      if (v.inventory().isEmpty()) {
-         g.drawString(this.font, "(empty bag)", innerL, y, FG_FAINT, true);
-      } else {
-         int slotX = innerL;
-         int rendered = 0;
-         for (var ic : v.inventory()) {
-            if (rendered >= 12) break;
-            var stack = stackForItemId(ic.itemId());
-            g.renderItem(stack, slotX, y);
-            String count = String.valueOf(ic.count());
-            g.drawString(this.font, count, slotX + 18 - this.font.width(count), y + 8, FG_FAINT, true);
-            slotX += 26;
-            rendered++;
-         }
-         if (v.inventory().size() > 12) {
-            g.drawString(this.font, "+" + (v.inventory().size() - 12) + " more",
-               slotX, y + 4, FG_FAINT, true);
-         }
-      }
-   }
-
-   private void renderDetailBackstoryBody(GuiGraphics g, TownStateUpdatePayload.VillagerSummary v,
-                                           int innerL, int innerR, int top, int bottom) {
-      // Persona seed label sits above the EditBox placed in init.
-      g.drawString(this.font, "Persona seed (informs the LLM-generated backstory below)",
-         innerL, top, FG_DIM, true);
-      int storyTop = top + 110;       // below the seed editor + save/regen row
-      g.drawString(this.font, "Backstory", innerL, storyTop, FG_DIM, true);
-      String bs = v.backstory() == null || v.backstory().isBlank() ? "(none yet)" : v.backstory();
-      List<FormattedCharSequence> wrapped = this.font.split(Component.literal(bs), innerR - innerL);
-      int by = storyTop + 12;
-      for (FormattedCharSequence seq : wrapped) {
-         if (by + this.font.lineHeight > bottom) break;
-         g.drawString(this.font, seq, innerL, by, FG_PRIMARY, true);
-         by += this.font.lineHeight + 2;
-      }
-   }
-
-   private void renderDetailMemoriesBody(GuiGraphics g, TownStateUpdatePayload.VillagerSummary v,
-                                          int innerL, int innerR, int top, int bottom) {
-      // Beliefs preview (2 lines max).
-      g.drawString(this.font, "Beliefs (auto-updated nightly)", innerL, top, FG_DIM, true);
-      String beliefs = v.beliefs() == null || v.beliefs().isBlank() ? "(none yet)" : v.beliefs();
-      List<FormattedCharSequence> beliefLines = this.font.split(Component.literal(beliefs), innerR - innerL - 110);
-      int by = top + 12;
-      int beliefsMax = 2;
-      for (int i = 0; i < beliefLines.size() && i < beliefsMax; i++) {
-         g.drawString(this.font, beliefLines.get(i), innerL, by, FG_PRIMARY, true);
-         by += this.font.lineHeight + 1;
-      }
-      if (beliefLines.size() > beliefsMax) {
-         g.drawString(this.font, "… (" + (beliefLines.size() - beliefsMax) + " more lines — Expand)",
-            innerL, by, FG_FAINT, true);
-      }
-
-      // Stats line.
-      int openTodos = (int) v.todos().stream().filter(t -> "open".equals(t.status())).count();
-      String stats = String.format(Locale.ROOT,
-         "memories: %d • compacted day %d • todos: %d open • pins: %d/100",
-         v.memoryCount(), v.lastCompactedDay(), openTodos, v.pinnedFacts().size());
-      g.drawString(this.font, stats, innerL, top + 48, FG_FAINT, true);
-
-      // Pinned facts list (scrollable).
-      int listTop = top + DETAIL_MEMORIES_LIST_TOP;
-      int listBottom = bottom - 30;
-      int rowH = 22;
-      scaledScissor(g, innerL, listTop, innerR, listBottom);
-      int y = listTop - this.detailTabScroll;
-      g.drawString(this.font,
-         "Pinned facts (" + v.pinnedFacts().size() + "/100)", innerL, y, FG_DIM, true);
-      y += 12;
-      if (v.pinnedFacts().isEmpty()) {
-         g.drawString(this.font, "(none — add below to lock in long-term memories)",
-            innerL, y, FG_FAINT, true);
-      } else {
-         for (TownStateUpdatePayload.PinSummary p : v.pinnedFacts()) {
-            if (y + rowH < listTop) { y += rowH; continue; }
-            if (y > listBottom)     break;
-            g.fill(innerL, y, innerR - 50, y + rowH - 2, ROW_BG);
-            int textFg = "resolved".equals(p.status()) ? FG_RESOLVED : FG_PRIMARY;
-            String shown = truncate(p.text(), (innerR - 50) - innerL - 8);
-            g.drawString(this.font, shown, innerL + 4, y + 3, textFg, true);
-            String tag = "resolved".equals(p.status()) ? "resolved" : ("day " + p.createdDay());
-            g.drawString(this.font, tag, innerL + 4, y + 13, FG_FAINT, true);
-            y += rowH;
-         }
-      }
-      g.disableScissor();
-   }
-
-   private void renderDetailTodosBody(GuiGraphics g, TownStateUpdatePayload.VillagerSummary v,
-                                       int innerL, int innerR, int top, int bottom) {
-      int openTodos = (int) v.todos().stream().filter(t -> "open".equals(t.status())).count();
-      g.drawString(this.font, "Open commitments (" + openTodos + ")", innerL, top, FG_DIM, true);
-      if (openTodos == 0) {
-         g.drawString(this.font, "(nothing on their plate)", innerL, top + 14, FG_FAINT, true);
-         return;
-      }
-      int listTop = top + 14;
-      int rowH = 22;
-      scaledScissor(g, innerL, listTop, innerR, bottom);
-      int y = listTop - this.detailTabScroll;
-      for (var t : v.todos()) {
-         if (!"open".equals(t.status())) continue;
-         if (y + rowH < listTop) { y += rowH; continue; }
-         if (y > bottom)         break;
-         g.fill(innerL, y, innerR - 50, y + rowH - 2, ROW_BG);
-         String txt = truncate(t.text(), innerR - 50 - innerL - 8);
-         g.drawString(this.font, txt, innerL + 4, y + 3, FG_PRIMARY, true);
-         g.drawString(this.font, "day " + t.createdDay(), innerL + 4, y + 13, FG_FAINT, true);
-         y += rowH;
-      }
-      g.disableScissor();
-   }
-
-   /** Y bounds of each rendered parcel row inside the Detail Parcels
-    *  tab. Populated by {@link #renderDetailParcelsBody}, consumed by
-    *  the click handler so clicking a row opens the appropriate
-    *  planner (CropPlan for PLANT, AnimalPlan for ANIMAL). */
-   private final java.util.LinkedHashMap<String, int[]> detailParcelRowRects =
-      new java.util.LinkedHashMap<>();
-
-   private void renderDetailParcelsBody(GuiGraphics g, TownStateUpdatePayload.VillagerSummary v,
-                                         int innerL, int innerR, int top, int bottom) {
-      detailParcelRowRects.clear();
-      g.drawString(this.font, "Owned parcels — click a row to open the planner",
-         innerL, top, FG_DIM, true);
-      int y = top + 14;
-      int count = 0;
-      int rowH = 22;
-      // Read mouse position via the Minecraft handle so hover state
-      // colors the row the player's about to click. Same trick the
-      // Trade-cell renderer uses.
-      double mxd = this.minecraft.mouseHandler.xpos()
-         * (double) this.minecraft.getWindow().getGuiScaledWidth()
-         / (double) this.minecraft.getWindow().getScreenWidth();
-      double myd = this.minecraft.mouseHandler.ypos()
-         * (double) this.minecraft.getWindow().getGuiScaledHeight()
-         / (double) this.minecraft.getWindow().getScreenHeight();
-      for (var p : this.state.parcels()) {
-         if (!v.uuid().equals(p.ownerUuid())) continue;
-         if (y + rowH > bottom) break;
-         count++;
-         boolean hovered = mxd >= innerL && mxd < innerR && myd >= y && myd < y + rowH - 2;
-         g.fill(innerL, y, innerR, y + rowH - 2, hovered ? TAB_ACTIVE_BG : ROW_BG);
-         net.minecraft.core.BlockPos centre = net.minecraft.core.BlockPos.of(p.centerPos());
-         String head = p.type() + " · " + p.sizeX() + "×" + p.sizeZ() + " @ " + centre.toShortString();
-         g.drawString(this.font, head, innerL + 4, y + 3, FG_PRIMARY, true);
-         g.drawString(this.font, parcelSnapshotText(p), innerL + 4, y + 13, FG_FAINT, true);
-         // Right-side hint chip.
-         String hint = "PLANT".equals(p.type()) ? "Open crop plan ▸" : "Open animal plan ▸";
-         g.drawString(this.font, hint, innerR - this.font.width(hint) - 4, y + 8, FG_ACCENT, true);
-         detailParcelRowRects.put(p.id(), new int[]{innerL, y, innerR - innerL, rowH - 2});
-         y += rowH;
-      }
-      if (count == 0) {
-         g.drawString(this.font, "(no parcels owned — use the Surveyor's Stake to mark land)",
-            innerL, y, FG_FAINT, true);
-      }
-   }
-
-   /** Hit-test the Detail Parcels tab. Returns the parcel id under
-    *  the cursor, or null if none. */
-   private String hitTestDetailParcelRow(double mouseX, double mouseY) {
-      for (var e : detailParcelRowRects.entrySet()) {
-         int[] r = e.getValue();
-         if (mouseX >= r[0] && mouseX < r[0] + r[2]
-             && mouseY >= r[1] && mouseY < r[1] + r[3]) {
-            return e.getKey();
-         }
-      }
-      return null;
-   }
-
-   private void renderDetailRelationshipsBody(GuiGraphics g, TownStateUpdatePayload.VillagerSummary v,
-                                               int innerL, int innerR, int top, int bottom) {
-      g.drawString(this.font, "Relationships (derived from tavern conversations + dialogue)",
-         innerL, top, FG_DIM, true);
-      int y = top + 14;
-      // Memory counts by tagged chat partner are server-side data we
-      // don't currently ship in VillagerSummary — render a placeholder
-      // for now, and a TODO note explaining what the next step is. The
-      // Stage 11e chat:<uuid> memory entries DO accumulate; surfacing
-      // them is a future stage.
-      g.drawString(this.font, "Relationship counters arrive in a future stage.",
-         innerL, y, FG_FAINT, true);
-      y += 12;
-      g.drawString(this.font, "Today the data exists (chat:<uuid> memories per banter)", innerL, y, FG_FAINT, true);
-      y += 11;
-      g.drawString(this.font, "but isn't aggregated yet — see Stage 11e for the writers.", innerL, y, FG_FAINT, true);
-   }
-
-   private void renderDetailActionsBody(GuiGraphics g, TownStateUpdatePayload.VillagerSummary v,
-                                         int innerL, int innerR, int top, int bottom) {
-      g.drawString(this.font, "Admin actions", innerL, top, FG_DIM, true);
-      g.drawString(this.font,
-         "Use these levers carefully — most are server-authoritative and instant.",
-         innerL, top + 50, FG_FAINT, true);
-      g.drawString(this.font,
-         "More levers (rename, clear home/job, manual leisure override) coming as server actions are added.",
-         innerL, top + 62, FG_FAINT, true);
-   }
+   // VILLAGER_DETAIL render pipeline lives in {@link VillagerDetailRenderer}
+   // (extracted in stage 15b.3). Init code (footer + per-tab widgets)
+   // still lives above in {@link #initVillagerDetailWidgets}.
 
    private void renderMemories(GuiGraphics graphics, int paneL, int paneR, int top, int bottom) {
       Optional<TownStateUpdatePayload.VillagerSummary> match = findVillager(this.selectedVillager);
