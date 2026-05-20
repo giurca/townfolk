@@ -200,12 +200,24 @@ public final class ScheduleService {
             LAST_HUNGER_DECAY_DAY.put(v.getUUID(), today);
             int before = comp.hunger();
             int after  = Math.max(0, before - HUNGER_DAILY_DECAY);
-            if (after != before) {
+            // Stage 18a: same dawn guard tracks the age increment so a
+            // poll storm at dawn doesn't add multiple days. Combined
+            // hunger+age rewrite uses one setData call.
+            int ageBefore = comp.ageDays();
+            int ageAfter  = ageBefore + 1;
+            if (after != before || ageAfter != ageBefore) {
+               var nextAnchors = comp.anchors().withHunger(after).withAgeDays(ageAfter);
                v.setData(com.yucareux.townfolk.registry.ModRegistries.LLM_VILLAGER.get(),
-                  comp.withHunger(after));
+                  new com.yucareux.townfolk.villager.LlmVillagerComponent(
+                     comp.personaSeed(), comp.backstory(), comp.memoryNamespace(),
+                     comp.townSquarePos(), comp.dialogueHistory(), comp.llmCalls(),
+                     comp.inputTokens(), comp.outputTokens(), comp.pinnedFacts(),
+                     comp.beliefs(), comp.memories(), comp.lastCompactedDay(),
+                     comp.todos(), nextAnchors, comp.reflexes(), comp.parcels()));
                comp = v.getData(com.yucareux.townfolk.registry.ModRegistries.LLM_VILLAGER.get());
-               com.yucareux.townfolk.diag.VerboseLog.write("HUNGER_DECAY",
-                  "villager=" + nameOf(v) + " " + before + " → " + after, "");
+               com.yucareux.townfolk.diag.VerboseLog.write("DAWN_TICK",
+                  "villager=" + nameOf(v) + " hunger=" + before + "→" + after
+                     + " age=" + ageBefore + "→" + ageAfter, "");
             }
          }
       }

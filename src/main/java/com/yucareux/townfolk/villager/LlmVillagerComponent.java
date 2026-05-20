@@ -41,27 +41,45 @@ public record LlmVillagerComponent(
    List<FieldRegion> parcels
 ) {
 
-   /** Bundles the player-set anchor flags + hunger so the parent
-    *  record stays under Mojang Codec's 16-field limit. {@code home}
-    *  / {@code job} == "the player explicitly assigned this villager
-    *  a home/workstation". {@code hunger} is 0..100, where 100 = full,
-    *  0 = starving (Stage 12). Preserves the external accessor
-    *  surface ({@link #playerSetHome()} / {@link #playerSetJob()})
-    *  so call sites don't need to change. */
-   public record Anchors(boolean home, boolean job, int hunger) {
+   /** Bundles the player-set anchor flags + hunger + identity stripe
+    *  (gender + ageDays) so the parent record stays under Mojang
+    *  Codec's 16-field limit. {@code home} / {@code job} == "the
+    *  player explicitly assigned this villager a home/workstation".
+    *  {@code hunger} is 0..100, where 100 = full, 0 = starving
+    *  (Stage 12). {@code gender} + {@code ageDays} added in Stage 18a
+    *  — gender drives breeding pairing, ageDays is incremented at
+    *  dawn rollover by ScheduleService.
+    *
+    *  <p>Preserves the external accessor surface
+    *  ({@link #playerSetHome()} / {@link #playerSetJob()}) so call
+    *  sites don't need to change. */
+   public record Anchors(boolean home, boolean job, int hunger,
+                          Gender gender, int ageDays) {
       public Anchors {
          hunger = Math.max(0, Math.min(100, hunger));
+         if (gender == null) gender = Gender.MALE;
+         ageDays = Math.max(0, ageDays);
       }
-      public static final Anchors NONE = new Anchors(false, false, 100);
+      /** Default for newly-spawned villagers BEFORE the spawn path
+       *  has had a chance to randomise gender via {@link Gender#fromUuid}
+       *  and set the correct starting age. Existing villagers loading
+       *  from saves before Stage 18a get this exact tuple. */
+      public static final Anchors NONE = new Anchors(false, false, 100, Gender.MALE, 200);
+
       public static final com.mojang.serialization.Codec<Anchors> CODEC =
          com.mojang.serialization.codecs.RecordCodecBuilder.create(i -> i.group(
             Codec.BOOL.optionalFieldOf("home", false).forGetter(Anchors::home),
             Codec.BOOL.optionalFieldOf("job",  false).forGetter(Anchors::job),
-            Codec.INT.optionalFieldOf("hunger", 100).forGetter(Anchors::hunger)
+            Codec.INT.optionalFieldOf("hunger", 100).forGetter(Anchors::hunger),
+            Gender.CODEC.optionalFieldOf("gender", Gender.MALE).forGetter(Anchors::gender),
+            Codec.INT.optionalFieldOf("age_days", 200).forGetter(Anchors::ageDays)
          ).apply(i, Anchors::new));
-      public Anchors withHome(boolean v)   { return new Anchors(v, job, hunger); }
-      public Anchors withJob(boolean v)    { return new Anchors(home, v, hunger); }
-      public Anchors withHunger(int v)     { return new Anchors(home, job, v); }
+
+      public Anchors withHome(boolean v)   { return new Anchors(v, job, hunger, gender, ageDays); }
+      public Anchors withJob(boolean v)    { return new Anchors(home, v, hunger, gender, ageDays); }
+      public Anchors withHunger(int v)     { return new Anchors(home, job, v, gender, ageDays); }
+      public Anchors withGender(Gender g)  { return new Anchors(home, job, hunger, g, ageDays); }
+      public Anchors withAgeDays(int days) { return new Anchors(home, job, hunger, gender, days); }
    }
 
    /** Backwards-compat accessor — preserves the {@code playerSetHome} reader
@@ -73,12 +91,44 @@ public record LlmVillagerComponent(
     *  dawn rollover; tops up when the villager eats. */
    public int hunger() { return anchors.hunger(); }
 
+   /** Villager gender — male/female only by design (breeding needs a
+    *  clean two-sex pairing model). Default {@link Gender#MALE} on
+    *  load; new villagers should be assigned via {@link Gender#fromUuid}
+    *  at spawn. */
+   public Gender gender() { return anchors.gender(); }
+
+   /** Age in in-game days. Incremented at dawn by
+    *  {@link com.yucareux.townfolk.world.ScheduleService}. Drives the
+    *  derived {@link #ageCategory()} which gates breeding + work. */
+   public int ageDays() { return anchors.ageDays(); }
+
+   /** Convenience: {@link AgeCategory#fromDays(int) AgeCategory.fromDays(ageDays())}. */
+   public AgeCategory ageCategory() { return AgeCategory.fromDays(anchors.ageDays()); }
+
    /** Convenience for callers that prefer chaining on the component
     *  directly (rather than {@code .withAnchors(c.anchors().withHunger(...))}). */
    public LlmVillagerComponent withHunger(int v) {
       return new LlmVillagerComponent(personaSeed, backstory, memoryNamespace, townSquarePos,
          dialogueHistory, llmCalls, inputTokens, outputTokens, pinnedFacts, beliefs, memories,
          lastCompactedDay, todos, anchors.withHunger(v), reflexes, parcels);
+   }
+
+   public LlmVillagerComponent withGender(Gender g) {
+      return new LlmVillagerComponent(personaSeed, backstory, memoryNamespace, townSquarePos,
+         dialogueHistory, llmCalls, inputTokens, outputTokens, pinnedFacts, beliefs, memories,
+         lastCompactedDay, todos, anchors.withGender(g), reflexes, parcels);
+   }
+
+   public LlmVillagerComponent withAgeDays(int days) {
+      return new LlmVillagerComponent(personaSeed, backstory, memoryNamespace, townSquarePos,
+         dialogueHistory, llmCalls, inputTokens, outputTokens, pinnedFacts, beliefs, memories,
+         lastCompactedDay, todos, anchors.withAgeDays(days), reflexes, parcels);
+   }
+
+   /** Idiomatic shortcut for {@code withAgeDays(ageDays() + 1)} used
+    *  by the dawn rollover in ScheduleService. */
+   public LlmVillagerComponent withAgeIncremented() {
+      return withAgeDays(ageDays() + 1);
    }
 
    public static final int MAX_HISTORY = 24;

@@ -396,12 +396,25 @@ public final class TownAdminService {
       town.getTown().addVillager(entry);
       town.setChanged();
 
+      // Stage 18a: assign gender via UUID-LSB parity for a stable 50/50
+      // split (no RNG noise across reloads), age starts at the ADULT
+      // floor (200 days) so manually-spawned villagers can immediately
+      // do everything. The BirthService (Stage 18e) spawns children at
+      // age 0 by overriding withAgeDays(0) before setData.
+      com.yucareux.townfolk.villager.Gender spawnGender =
+         com.yucareux.townfolk.villager.Gender.fromUuid(villager.getUUID());
+      LlmVillagerComponent.Anchors anchors = LlmVillagerComponent.Anchors.NONE
+         .withGender(spawnGender);
       LlmVillagerComponent component = new LlmVillagerComponent(
          seed, "", villager.getUUID().toString(), town.getBlockPos().asLong(),
          java.util.List.of(), 0, 0L, 0L,
          java.util.List.of(), "", java.util.List.of(), level.getGameTime() / 24000L,
-         java.util.List.of(), LlmVillagerComponent.Anchors.NONE, java.util.List.of(), java.util.List.of());
+         java.util.List.of(), anchors, java.util.List.of(), java.util.List.of());
       villager.setData(ModRegistries.LLM_VILLAGER.get(), component);
+      com.yucareux.townfolk.diag.VerboseLog.write("SPAWN_IDENTITY",
+         "name=" + chosenName + " uuid=" + villager.getUUID()
+            + " gender=" + spawnGender.wireKey() + " age=" + anchors.ageDays(),
+         "");
 
       MinecraftServer server = level.getServer();
       pushState(player, level, town, "ok-cached");
