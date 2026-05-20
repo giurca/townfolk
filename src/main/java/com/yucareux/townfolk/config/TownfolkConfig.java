@@ -123,6 +123,17 @@ public final class TownfolkConfig {
          ).defineInRange("daily_budget", 20, 0, 200);
 
          b.pop();
+
+         b.comment("Diagnostics: extra verbose logging + per-phase timing samples.")
+            .push("diagnostics");
+
+         this.verboseDiagnostics = b.comment(
+            "Master switch for the diag/* output channels (VerboseLog and PerfLog).",
+            "Leave off for normal play — keeps the log file small. Flip on to",
+            "investigate behaviour or measure per-tick costs."
+         ).define("verbose", false);
+
+         b.pop();
       }
 
       public final ModConfigSpec.ConfigValue<Boolean> peaceful;
@@ -130,6 +141,7 @@ public final class TownfolkConfig {
       public final ModConfigSpec.IntValue autonomyIntervalTicks;
       public final ModConfigSpec.IntValue autonomyCooldownTicks;
       public final ModConfigSpec.IntValue autonomyDailyBudget;
+      public final ModConfigSpec.ConfigValue<Boolean> verboseDiagnostics;
    }
 
    private TownfolkConfig() {

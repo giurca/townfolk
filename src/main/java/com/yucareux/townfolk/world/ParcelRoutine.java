@@ -59,6 +59,19 @@ public final class ParcelRoutine {
     *  matches how a human would actually farm a plot. */
    public static boolean tryTick(WorkProductionService.Ctx ctx) {
       if (ctx.comp().parcels().isEmpty()) return false;
+      // Stage 19: per-villager tick timing. Bails fast when verbose
+      // diagnostics is off (one volatile read).
+      long perfT0 = com.yucareux.townfolk.diag.PerfLog.now();
+      try {
+         return tryTickImpl(ctx);
+      } finally {
+         com.yucareux.townfolk.diag.PerfLog.sample("ParcelRoutine.tryTick",
+            com.yucareux.townfolk.diag.PerfLog.now() - perfT0);
+      }
+   }
+
+   private static boolean tryTickImpl(WorkProductionService.Ctx ctx) {
+      if (ctx.comp().parcels().isEmpty()) return false;
 
       // Yield to the schedule outside work hours. Without this, the
       // chain listener fires a new task on every BlockTask completion

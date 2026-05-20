@@ -168,6 +168,16 @@ public final class MealService {
    private record FoodHit(BlockPos pos, Container container, String itemId, int hungerValue) {}
 
    private static FoodHit findBestFoodInTown(ServerLevel level, BlockPos from) {
+      long perfT0 = com.yucareux.townfolk.diag.PerfLog.now();
+      try {
+         return findBestFoodInTownImpl(level, from);
+      } finally {
+         com.yucareux.townfolk.diag.PerfLog.sample("MealService.findBestFoodInTown",
+            com.yucareux.townfolk.diag.PerfLog.now() - perfT0);
+      }
+   }
+
+   private static FoodHit findBestFoodInTownImpl(ServerLevel level, BlockPos from) {
       // Tag-driven food search. For each priority tier (top-down),
       // scan every registered town barrel for ANY item belonging to
       // the tier's tag. First hit at the highest tier wins. Modded
