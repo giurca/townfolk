@@ -158,6 +158,17 @@ public final class TownAdminScreen extends Screen {
    /** "all" / "working" / "idle" / "sleeping" — filter chip on activity. */
    private String villagerStatusFilter = "all";
    private Mode mode = Mode.NORMAL;
+
+   /** Sub-tabs inside VILLAGER_DETAIL mode. Each renders its own body
+    *  and registers its own widgets in {@link #initVillagerDetailWidgets}.
+    *  Persistent across rebuilds so the player stays on the tab they
+    *  picked when state updates arrive. */
+   private enum DetailTab { OVERVIEW, BACKSTORY, MEMORIES, TODOS, PARCELS, RELATIONSHIPS, ACTIONS }
+   private DetailTab detailTab = DetailTab.OVERVIEW;
+
+   /** Scroll offset (px) for tab bodies that need it (Backstory text,
+    *  Memories list, Relationships table). Reset on tab switch. */
+   private int detailTabScroll = 0;
    private UUID selectedVillager;
    private int scrollOffset;
    private int memoryScrollOffset;
@@ -271,8 +282,13 @@ public final class TownAdminScreen extends Screen {
 
    private void initBeliefsFullWidgets(int paneL, int paneR, int top, int bottom) {
       int innerR = paneR - PADDING;
+      // Back goes to the VILLAGER_DETAIL Memories tab — that's where
+      // the Expand-beliefs button lives now. The old standalone
+      // MEMORIES mode is unreachable post-Stage 13 refactor; this
+      // routing keeps the navigation consistent.
       addRenderableWidget(Button.builder(Component.literal("← Back"), b -> {
-         this.mode = Mode.MEMORIES;
+         this.mode = Mode.VILLAGER_DETAIL;
+         this.detailTab = DetailTab.MEMORIES;
          this.beliefsScrollOffset = 0;
          rebuildAdminWidgets();
       }).bounds(innerR - 60, top, 60, 18).build());
@@ -1076,6 +1092,14 @@ public final class TownAdminScreen extends Screen {
       this.setInitialFocus(this.spawnNameBox);
    }
 
+   /** Reserved Y bands inside VILLAGER_DETAIL mode. The header always
+    *  occupies the first DETAIL_HEADER_H pixels of the content area;
+    *  the tab strip sits just under it; tab body fills the rest above
+    *  the footer button row. */
+   private static final int DETAIL_HEADER_H = 56;
+   private static final int DETAIL_TAB_STRIP_H = 18;
+   private static final int DETAIL_FOOTER_H = 26;
+
    private void initVillagerDetailWidgets(int paneL, int paneR, int top, int bottom) {
       Optional<TownStateUpdatePayload.VillagerSummary> match = findVillager(this.selectedVillager);
       if (match.isEmpty()) {
@@ -1086,48 +1110,165 @@ public final class TownAdminScreen extends Screen {
       TownStateUpdatePayload.VillagerSummary v = match.get();
       int innerL = paneL + PADDING;
       int innerR = paneR - PADDING;
-      int width = innerR - innerL;
+      int width  = innerR - innerL;
 
-      this.detailSeedBox = new EditBox(this.font, innerL, top + 28, width, 60, Component.literal("persona seed"));
-      this.detailSeedBox.setMaxLength(500);
-      this.detailSeedBox.setValue(v.personaSeed());
-      addRenderableWidget(this.detailSeedBox);
+      // Body / footer Y coordinates derived from the reserved bands.
+      int tabBodyTop = top + DETAIL_HEADER_H + DETAIL_TAB_STRIP_H + 4;
+      int tabBodyBottom = bottom - DETAIL_FOOTER_H;
 
-      addRenderableWidget(Button.builder(Component.literal("Back"), b -> {
+      // ── Footer (always visible) ───────────────────────────────────
+      // Left: Back button (returns to Villagers grid).
+      // Middle: Open Dialogue (legacy modal; player ↔ villager chat).
+      // Right: Remove (kill villager; with confirmation via single click for now).
+      addRenderableWidget(Button.builder(Component.literal("← Back"), b -> {
          this.mode = Mode.NORMAL;
          this.tab = Tab.VILLAGERS;
          this.selectedVillager = null;
+         this.detailTab = DetailTab.OVERVIEW;
+         this.detailTabScroll = 0;
          rebuildAdminWidgets();
-      }).bounds(innerL, bottom - 22, 50, 20).build());
+      }).bounds(innerL, bottom - 22, 60, 20).build());
 
-      addRenderableWidget(Button.builder(Component.literal("Save persona"), b -> {
-         String seed = this.detailSeedBox.getValue().trim();
-         PacketDistributor.sendToServer(AdminActionPayload.editPersona(townPos(), v.uuid(), seed));
-      }).bounds(innerL + 54, bottom - 22, 86, 20).build());
-
-      addRenderableWidget(Button.builder(Component.literal("Memories"), b -> {
-         this.mode = Mode.MEMORIES;
-         this.memoryScrollOffset = 0;
-         rebuildAdminWidgets();
-      }).bounds(innerL + 144, bottom - 22, 74, 20).build());
-
-      addRenderableWidget(Button.builder(Component.literal("Log"), b -> {
-         this.mode = Mode.VILLAGER_LOG;
-         rebuildAdminWidgets();
-      }).bounds(innerL + 222, bottom - 22, 40, 20).build());
-
-      addRenderableWidget(Button.builder(Component.literal("Regen story"), b ->
-         PacketDistributor.sendToServer(AdminActionPayload.regenerateBackstory(townPos(), v.uuid()))
-      ).bounds(innerL + 266, bottom - 22, 78, 20).build());
+      addRenderableWidget(Button.builder(Component.literal("Open Dialogue"), b -> {
+         // /townfolk talk <uuid> — server-side command routes to
+         // DialogueService.openWithVillager which pushes an
+         // OpenDialoguePayload back to the client. Same path
+         // NeedsService.maybeHail builds clickable chat links for.
+         if (this.minecraft != null && this.minecraft.player != null
+             && this.minecraft.player.connection != null) {
+            this.minecraft.player.connection.sendCommand("townfolk talk " + v.uuid());
+         }
+         this.onClose();      // hand the screen back so dialogue can take over
+      }).bounds(innerL + 64, bottom - 22, 96, 20).build());
 
       addRenderableWidget(Button.builder(Component.literal("Remove"), b -> {
          PacketDistributor.sendToServer(AdminActionPayload.remove(townPos(), v.uuid()));
          this.mode = Mode.NORMAL;
          this.tab = Tab.VILLAGERS;
          this.selectedVillager = null;
+         this.detailTab = DetailTab.OVERVIEW;
          rebuildAdminWidgets();
       }).bounds(innerR - 64, bottom - 22, 64, 20).build());
+
+      // ── Per-tab widgets ───────────────────────────────────────────
+      switch (this.detailTab) {
+         case OVERVIEW -> { /* read-only — no widgets */ }
+         case BACKSTORY -> initDetailBackstoryWidgets(v, innerL, innerR, tabBodyTop, tabBodyBottom);
+         case MEMORIES  -> initDetailMemoriesWidgets(v, innerL, innerR, tabBodyTop, tabBodyBottom);
+         case TODOS     -> initDetailTodosWidgets(v, innerL, innerR, tabBodyTop, tabBodyBottom);
+         case PARCELS   -> { /* read-only for now — popup driven from clicks */ }
+         case RELATIONSHIPS -> { /* read-only */ }
+         case ACTIONS   -> initDetailActionsWidgets(v, innerL, innerR, tabBodyTop, tabBodyBottom);
+      }
    }
+
+   private void initDetailBackstoryWidgets(TownStateUpdatePayload.VillagerSummary v,
+                                            int innerL, int innerR, int top, int bottom) {
+      int width = innerR - innerL;
+      // Persona seed editor — first widget in the Backstory tab.
+      this.detailSeedBox = new EditBox(this.font, innerL, top + 16, width, 60,
+         Component.literal("persona seed"));
+      this.detailSeedBox.setMaxLength(500);
+      this.detailSeedBox.setValue(v.personaSeed());
+      addRenderableWidget(this.detailSeedBox);
+
+      addRenderableWidget(Button.builder(Component.literal("Save persona"), b -> {
+         String seed = this.detailSeedBox.getValue().trim();
+         PacketDistributor.sendToServer(AdminActionPayload.editPersona(townPos(), v.uuid(), seed));
+      }).bounds(innerR - 200, top + 80, 96, 20).build());
+
+      addRenderableWidget(Button.builder(Component.literal("Regen story"), b ->
+         PacketDistributor.sendToServer(AdminActionPayload.regenerateBackstory(townPos(), v.uuid()))
+      ).bounds(innerR - 100, top + 80, 100, 20).build());
+   }
+
+   private void initDetailMemoriesWidgets(TownStateUpdatePayload.VillagerSummary v,
+                                           int innerL, int innerR, int top, int bottom) {
+      int width = innerR - innerL;
+      // Add-fact row, anchored to the bottom of the tab body.
+      this.newPersonalFactBox = new EditBox(this.font, innerL, bottom - 22, width - 56, 20,
+         Component.literal("new pinned fact"));
+      this.newPersonalFactBox.setMaxLength(240);
+      addRenderableWidget(this.newPersonalFactBox);
+      addRenderableWidget(Button.builder(Component.literal("Add"), b -> {
+         String text = this.newPersonalFactBox.getValue().trim();
+         if (text.isEmpty()) return;
+         PacketDistributor.sendToServer(AdminActionPayload.pinAddPersonal(townPos(), v.uuid(), text));
+         this.newPersonalFactBox.setValue("");
+      }).bounds(innerR - 52, bottom - 22, 52, 20).build());
+
+      // "Expand beliefs" button — opens the full-page belief view.
+      addRenderableWidget(Button.builder(Component.literal("Expand beliefs"), b -> {
+         this.mode = Mode.BELIEFS_FULL;
+         this.beliefsScrollOffset = 0;
+         rebuildAdminWidgets();
+      }).bounds(innerR - 100, top, 100, 14).build());
+
+      // Per-pin chip buttons (✓ resolve / ✕ delete). Lined up against
+      // the rendered pin rows in renderDetailMemoriesBody — Y math must
+      // match.
+      int listTop = top + DETAIL_MEMORIES_LIST_TOP;
+      int rowH = 22;
+      int y = listTop - this.detailTabScroll;
+      for (TownStateUpdatePayload.PinSummary p : v.pinnedFacts()) {
+         if (y + rowH < listTop) { y += rowH; continue; }
+         if (y > bottom - 40)    break;
+         int btnX = innerR - 44;
+         if (!"resolved".equals(p.status())) {
+            addRenderableWidget(Button.builder(Component.literal("✓"), b ->
+               PacketDistributor.sendToServer(
+                  AdminActionPayload.pinResolvePersonal(townPos(), v.uuid(), p.id()))
+            ).bounds(btnX, y + 2, 18, 18).build());
+         }
+         addRenderableWidget(Button.builder(Component.literal("✕"), b ->
+            PacketDistributor.sendToServer(
+               AdminActionPayload.pinRemovePersonal(townPos(), v.uuid(), p.id()))
+         ).bounds(btnX + 22, y + 2, 18, 18).build());
+         y += rowH;
+      }
+   }
+
+   private void initDetailTodosWidgets(TownStateUpdatePayload.VillagerSummary v,
+                                        int innerL, int innerR, int top, int bottom) {
+      int listTop = top + 14;
+      int rowH = 22;
+      int y = listTop - this.detailTabScroll;
+      for (var t : v.todos()) {
+         if (!"open".equals(t.status())) continue;
+         if (y + rowH < listTop) { y += rowH; continue; }
+         if (y > bottom - 6)     break;
+         int btnX = innerR - 44;
+         addRenderableWidget(Button.builder(Component.literal("✓"), b ->
+            PacketDistributor.sendToServer(
+               AdminActionPayload.todoComplete(townPos(), v.uuid(), t.id()))
+         ).bounds(btnX, y + 2, 18, 18).build());
+         addRenderableWidget(Button.builder(Component.literal("✕"), b ->
+            PacketDistributor.sendToServer(
+               AdminActionPayload.todoAbandon(townPos(), v.uuid(), t.id()))
+         ).bounds(btnX + 22, y + 2, 18, 18).build());
+         y += rowH;
+      }
+   }
+
+   private void initDetailActionsWidgets(TownStateUpdatePayload.VillagerSummary v,
+                                          int innerL, int innerR, int top, int bottom) {
+      // Open log — VILLAGER_LOG mode still exists, accessed from here.
+      addRenderableWidget(Button.builder(Component.literal("Open log"), b -> {
+         this.mode = Mode.VILLAGER_LOG;
+         rebuildAdminWidgets();
+      }).bounds(innerL, top + 14, 120, 20).build());
+
+      // Refresh state — re-emit TownStateUpdatePayload so any
+      // background changes (e.g. inventory) reflect immediately.
+      addRenderableWidget(Button.builder(Component.literal("Refresh state"), b ->
+         PacketDistributor.sendToServer(AdminActionPayload.open(townPos()))
+      ).bounds(innerL + 128, top + 14, 120, 20).build());
+   }
+
+   /** Y offset inside the Memories tab where the scrollable list
+    *  starts. Header band (beliefs preview + stats line) takes the
+    *  first DETAIL_MEMORIES_LIST_TOP pixels. */
+   private static final int DETAIL_MEMORIES_LIST_TOP = 60;
 
    // ----- Memories view -----
 
@@ -1396,6 +1537,18 @@ public final class TownAdminScreen extends Screen {
             }
          }
       }
+
+      // ── Villager detail: tab-strip click switches tabs. ──
+      if (this.mode == Mode.VILLAGER_DETAIL) {
+         DetailTab clickedTab = hitTestDetailTabs(mouseX, mouseY);
+         if (clickedTab != null && clickedTab != this.detailTab) {
+            this.detailTab = clickedTab;
+            this.detailTabScroll = 0;
+            rebuildAdminWidgets();
+            return true;
+         }
+      }
+
       return super.mouseClicked(mouseX, mouseY, button);
    }
 
@@ -1483,6 +1636,14 @@ public final class TownAdminScreen extends Screen {
          rebuildAdminWidgets();
          return true;
       }
+      if (this.mode == Mode.VILLAGER_DETAIL
+          && (this.detailTab == DetailTab.MEMORIES
+              || this.detailTab == DetailTab.TODOS
+              || this.detailTab == DetailTab.BACKSTORY)) {
+         this.detailTabScroll = Math.max(0, this.detailTabScroll - (int) (scrollY * 18));
+         rebuildAdminWidgets();          // chip buttons re-bind to new Y positions
+         return true;
+      }
       if (this.mode == Mode.BELIEFS_FULL) {
          this.beliefsScrollOffset = Math.max(0, this.beliefsScrollOffset - (int) (scrollY * 18));
          return true;
@@ -1494,12 +1655,19 @@ public final class TownAdminScreen extends Screen {
    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
       if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
          if (this.mode == Mode.BELIEFS_FULL) {
-            this.mode = Mode.MEMORIES;
+            // Beliefs is opened from the Memories tab inside the
+            // detail modal — back goes there.
+            this.mode = Mode.VILLAGER_DETAIL;
+            this.detailTab = DetailTab.MEMORIES;
             rebuildAdminWidgets();
             return true;
          }
          if (this.mode == Mode.MEMORIES) {
+            // Legacy standalone Memories mode is no longer reachable
+            // post-Stage 13 refactor, but if anything sets it the
+            // ESC path drops back to the detail modal cleanly.
             this.mode = Mode.VILLAGER_DETAIL;
+            this.detailTab = DetailTab.MEMORIES;
             rebuildAdminWidgets();
             return true;
          }
@@ -1575,7 +1743,7 @@ public final class TownAdminScreen extends Screen {
             }
          }
          case SPAWN_FORM -> renderSpawnForm(graphics, l, r, t + headerH + 16, b - PADDING);
-         case VILLAGER_DETAIL -> renderVillagerDetail(graphics, l, r, t + headerH + 16, b - PADDING);
+         case VILLAGER_DETAIL -> renderVillagerDetail(graphics, l, r, t + headerH + 16, b - PADDING, mouseX, mouseY);
          case MEMORIES -> renderMemories(graphics, l, r, t + headerH + 16, b - PADDING);
          case BELIEFS_FULL -> renderBeliefsFull(graphics, l, r, t + headerH + 16, b - PADDING);
          case VILLAGER_LOG -> renderVillagerLog(graphics, l, r, t + headerH + 16, b - PADDING);
@@ -2881,54 +3049,343 @@ public final class TownAdminScreen extends Screen {
          innerL, top + 56, FG_DIM, true);
    }
 
-   private void renderVillagerDetail(GuiGraphics graphics, int paneL, int paneR, int top, int bottom) {
+   private void renderVillagerDetail(GuiGraphics graphics, int paneL, int paneR, int top, int bottom,
+                                      int mouseX, int mouseY) {
       Optional<TownStateUpdatePayload.VillagerSummary> match = findVillager(this.selectedVillager);
       if (match.isEmpty()) return;
       TownStateUpdatePayload.VillagerSummary v = match.get();
       int innerL = paneL + PADDING;
       int innerR = paneR - PADDING;
 
-      graphics.drawString(this.font,
-         Component.literal(v.name()).withStyle(ChatFormatting.GOLD),
-         innerL, top, FG_ACCENT, true);
-      String act = prettifyActivity(v.activity());
-      graphics.drawString(this.font, act, innerR - this.font.width(act), top, FG_DIM, true);
+      // ── 1. Persistent header (always visible) ──
+      renderDetailHeader(graphics, v, innerL, innerR, top);
 
-      // Hunger bar mirrors the HP styling — 80-wide bar, fill colour
-      // shifts from green (full) through yellow → red (starving).
-      int hungerBarW = 80, hungerBarH = 5;
-      int hungerX = innerR - hungerBarW;
-      int hungerY = top + 12;
-      int hungerFill = (int) Math.round(hungerBarW * (v.hunger() / 100.0));
-      int hungerColor = v.hunger() >= 70 ? 0xFF6FA445   // green
-                       : v.hunger() >= 40 ? 0xFFE0B040  // amber
-                       :                    0xFFD55050; // red
-      graphics.fill(hungerX, hungerY, hungerX + hungerBarW, hungerY + hungerBarH, 0xFF2A1F15);
-      graphics.fill(hungerX, hungerY, hungerX + hungerFill, hungerY + hungerBarH, hungerColor);
-      String hungerLabel = "Hunger " + v.hunger() + "/100";
-      graphics.drawString(this.font, hungerLabel,
-         hungerX - this.font.width(hungerLabel) - 6, hungerY - 1, FG_FAINT, true);
+      // ── 2. Tab strip ──
+      int tabsY = top + DETAIL_HEADER_H;
+      renderDetailTabStrip(graphics, innerL, innerR, tabsY, mouseX, mouseY);
 
-      graphics.drawString(this.font, "Persona seed", innerL, top + 22, FG_DIM, true);
+      // ── 3. Tab body ──
+      int bodyTop = tabsY + DETAIL_TAB_STRIP_H + 4;
+      int bodyBottom = bottom - DETAIL_FOOTER_H;
+      switch (this.detailTab) {
+         case OVERVIEW      -> renderDetailOverviewBody(graphics, v, innerL, innerR, bodyTop, bodyBottom);
+         case BACKSTORY     -> renderDetailBackstoryBody(graphics, v, innerL, innerR, bodyTop, bodyBottom);
+         case MEMORIES      -> renderDetailMemoriesBody(graphics, v, innerL, innerR, bodyTop, bodyBottom);
+         case TODOS         -> renderDetailTodosBody(graphics, v, innerL, innerR, bodyTop, bodyBottom);
+         case PARCELS       -> renderDetailParcelsBody(graphics, v, innerL, innerR, bodyTop, bodyBottom);
+         case RELATIONSHIPS -> renderDetailRelationshipsBody(graphics, v, innerL, innerR, bodyTop, bodyBottom);
+         case ACTIONS       -> renderDetailActionsBody(graphics, v, innerL, innerR, bodyTop, bodyBottom);
+      }
+   }
 
-      int backstoryTop = top + 100;
-      graphics.drawString(this.font, "Backstory", innerL, backstoryTop, FG_DIM, true);
-      String bs = v.backstory() == null || v.backstory().isBlank() ? "(none yet)" : v.backstory();
-      List<FormattedCharSequence> wrapped = this.font.split(Component.literal(bs), innerR - innerL);
-      int by = backstoryTop + 12;
-      int max = bottom - 50;
-      for (FormattedCharSequence seq : wrapped) {
-         if (by + this.font.lineHeight > max) break;
-         graphics.drawString(this.font, seq, innerL, by, FG_PRIMARY, true);
-         by += this.font.lineHeight + 2;
+   /** Persistent header: profession icon + name, status pills,
+    *  HP + Hunger bars, LLM cost summary on the right. */
+   private void renderDetailHeader(GuiGraphics g, TownStateUpdatePayload.VillagerSummary v,
+                                    int innerL, int innerR, int top) {
+      // Profession icon (16×16) on the left, name beside it.
+      g.renderItem(iconForProfession(v.profession()), innerL, top);
+      String name = v.name() + (v.alive() ? "" : " ✝");
+      g.drawString(this.font,
+         Component.literal(name).withStyle(ChatFormatting.GOLD),
+         innerL + 22, top + 2, FG_ACCENT, true);
+      String profLine = (v.profession() == null || v.profession().isBlank() || "none".equals(v.profession())
+                       ? "(unemployed)" : v.profession())
+                     + (v.role() == null || v.role().isBlank() || "resident".equals(v.role())
+                        ? "" : " · " + v.role());
+      g.drawString(this.font, profLine, innerL + 22, top + 12, FG_DIM, true);
+
+      // Status pills row at top + 22 — short, dense.
+      int pillX = innerL + 22;
+      pillX = drawStatusPill(g, pillX, top + 22, prettifyActivity(v.activity()), UiTheme.FAINT);
+      if (v.playerSetHome()) pillX = drawStatusPill(g, pillX, top + 22, "⌂ home", FG_DIM);
+      if (v.playerSetJob())  pillX = drawStatusPill(g, pillX, top + 22, "⚒ job",  FG_DIM);
+      if (v.hunger() < 50)   pillX = drawStatusPill(g, pillX, top + 22, "hungry", 0xFFD55050);
+
+      // Vitals on the right — HP bar, hunger bar, label stacked vertically.
+      int vBarW = 80;
+      int vBarX = innerR - vBarW;
+      int hpY = top + 2;
+      int hgY = top + 12;
+      UiBar.draw(g, vBarX, hpY, vBarW, 5, v.health(), v.maxHealth());
+      g.drawString(this.font, String.format(Locale.ROOT, "HP %.0f/%.0f", v.health(), v.maxHealth()),
+         vBarX - this.font.width("HP 99/99") - 6, hpY - 1, FG_FAINT, true);
+      int hungerFill = (int) Math.round(vBarW * (v.hunger() / 100.0));
+      int hungerColor = v.hunger() >= 70 ? 0xFF6FA445
+                       : v.hunger() >= 40 ? 0xFFE0B040
+                       :                    0xFFD55050;
+      g.fill(vBarX, hgY, vBarX + vBarW, hgY + 5, 0xFF2A1F15);
+      g.fill(vBarX, hgY, vBarX + hungerFill, hgY + 5, hungerColor);
+      g.drawString(this.font, "Hunger " + v.hunger() + "/100",
+         vBarX - this.font.width("Hunger 100/100") - 6, hgY - 1, FG_FAINT, true);
+      String metric = String.format(Locale.ROOT,
+         "%d calls • %d+%d tok • $%.4f", v.llmCalls(),
+         v.inputTokens(), v.outputTokens(), v.estCostUsd());
+      g.drawString(this.font, metric, innerR - this.font.width(metric), top + 22, FG_FAINT, true);
+
+      // Underline under the header band.
+      g.fill(innerL, top + DETAIL_HEADER_H - 4, innerR, top + DETAIL_HEADER_H - 3, PANEL_BORDER);
+   }
+
+   /** Status pill — a tiny labelled chip used by the header. Returns
+    *  the next X cursor so callers can chain pills horizontally. */
+   private int drawStatusPill(GuiGraphics g, int x, int y, String text, int fg) {
+      int w = this.font.width(text) + 8;
+      g.fill(x, y, x + w, y + 11, 0x802A1F15);
+      g.drawString(this.font, text, x + 4, y + 2, fg, true);
+      return x + w + 4;
+   }
+
+   /** Draw + hit-test the tab strip. Stores per-tab x rects so
+    *  mouseClicked can map clicks back to the right tab. */
+   private final java.util.EnumMap<DetailTab, int[]> detailTabRects = new java.util.EnumMap<>(DetailTab.class);
+   private void renderDetailTabStrip(GuiGraphics g, int innerL, int innerR, int y,
+                                      int mouseX, int mouseY) {
+      DetailTab[] tabs = DetailTab.values();
+      int cx = innerL;
+      for (DetailTab t : tabs) {
+         String label = tabLabel(t);
+         int w = this.font.width(label) + 12;
+         boolean active = t == this.detailTab;
+         boolean hovered = mouseX >= cx && mouseX < cx + w && mouseY >= y && mouseY < y + DETAIL_TAB_STRIP_H;
+         int bg = active ? TAB_ACTIVE_BG : (hovered ? ROW_BG : 0x00000000);
+         if (bg != 0) g.fill(cx, y, cx + w, y + DETAIL_TAB_STRIP_H, bg);
+         int textColor = active ? FG_ACCENT : (hovered ? FG_PRIMARY : FG_DIM);
+         g.drawString(this.font, label, cx + 6, y + 5, textColor, true);
+         if (active) g.fill(cx, y + DETAIL_TAB_STRIP_H, cx + w, y + DETAIL_TAB_STRIP_H + 1, FG_ACCENT);
+         detailTabRects.put(t, new int[]{cx, y, w, DETAIL_TAB_STRIP_H});
+         cx += w + 2;
+      }
+   }
+
+   private static String tabLabel(DetailTab t) {
+      return switch (t) {
+         case OVERVIEW      -> "Overview";
+         case BACKSTORY     -> "Backstory";
+         case MEMORIES      -> "Memories";
+         case TODOS         -> "Todos";
+         case PARCELS       -> "Parcels";
+         case RELATIONSHIPS -> "Relations";
+         case ACTIONS       -> "Actions";
+      };
+   }
+
+   /** Hit-test the tab strip. Returns the clicked tab or null. */
+   private DetailTab hitTestDetailTabs(double mouseX, double mouseY) {
+      for (var e : detailTabRects.entrySet()) {
+         int[] r = e.getValue();
+         if (mouseX >= r[0] && mouseX < r[0] + r[2]
+             && mouseY >= r[1] && mouseY < r[1] + r[3]) {
+            return e.getKey();
+         }
+      }
+      return null;
+   }
+
+   // ──────────────────── Tab bodies ────────────────────
+
+   private void renderDetailOverviewBody(GuiGraphics g, TownStateUpdatePayload.VillagerSummary v,
+                                          int innerL, int innerR, int top, int bottom) {
+      int y = top;
+      // Quick-look: parcels owned + todos open + memories + last day's
+      // schedule keyed off the activity status.
+      int openTodos = (int) v.todos().stream().filter(t -> "open".equals(t.status())).count();
+      int plantParcels = 0, animalParcels = 0;
+      // We don't carry per-villager parcel ids in VillagerSummary — pull
+      // from the top-level parcels list and match by owner.
+      for (var p : this.state.parcels()) {
+         if (v.uuid().equals(p.ownerUuid())) {
+            if ("PLANT".equals(p.type())) plantParcels++;
+            else if ("ANIMAL".equals(p.type())) animalParcels++;
+         }
       }
 
-      String metric = String.format(Locale.ROOT,
-         "%d calls • %d+%d tok • $%.4f • %d pins • beliefs %s",
-         v.llmCalls(), v.inputTokens(), v.outputTokens(), v.estCostUsd(),
-         v.pinnedFacts().size(),
-         (v.beliefs() == null || v.beliefs().isBlank()) ? "—" : "✓");
-      graphics.drawString(this.font, metric, innerL, bottom - 36, FG_FAINT, true);
+      g.drawString(this.font, "At a glance", innerL, y, FG_DIM, true);
+      y += 14;
+      g.drawString(this.font,
+         "• Parcels: " + (plantParcels + animalParcels)
+            + " (" + plantParcels + " plant · " + animalParcels + " animal)",
+         innerL, y, FG_PRIMARY, true); y += 11;
+      g.drawString(this.font,
+         "• Open todos: " + openTodos,
+         innerL, y, openTodos > 0 ? FG_ERROR : FG_PRIMARY, true); y += 11;
+      g.drawString(this.font,
+         "• Memories: " + v.memoryCount()
+            + " (last compacted day " + v.lastCompactedDay() + ")",
+         innerL, y, FG_PRIMARY, true); y += 11;
+      g.drawString(this.font,
+         "• Pinned facts: " + v.pinnedFacts().size() + " / 100",
+         innerL, y, FG_PRIMARY, true); y += 11;
+      g.drawString(this.font,
+         "• Inventory: " + v.inventory().size() + " stacks",
+         innerL, y, FG_PRIMARY, true); y += 14;
+
+      // Inventory preview — first few stacks rendered as item icons + counts.
+      g.drawString(this.font, "Carrying", innerL, y, FG_DIM, true);
+      y += 12;
+      if (v.inventory().isEmpty()) {
+         g.drawString(this.font, "(empty bag)", innerL, y, FG_FAINT, true);
+      } else {
+         int slotX = innerL;
+         int rendered = 0;
+         for (var ic : v.inventory()) {
+            if (rendered >= 12) break;
+            var stack = stackForItemId(ic.itemId());
+            g.renderItem(stack, slotX, y);
+            String count = String.valueOf(ic.count());
+            g.drawString(this.font, count, slotX + 18 - this.font.width(count), y + 8, FG_FAINT, true);
+            slotX += 26;
+            rendered++;
+         }
+         if (v.inventory().size() > 12) {
+            g.drawString(this.font, "+" + (v.inventory().size() - 12) + " more",
+               slotX, y + 4, FG_FAINT, true);
+         }
+      }
+   }
+
+   private void renderDetailBackstoryBody(GuiGraphics g, TownStateUpdatePayload.VillagerSummary v,
+                                           int innerL, int innerR, int top, int bottom) {
+      // Persona seed label sits above the EditBox placed in init.
+      g.drawString(this.font, "Persona seed (informs the LLM-generated backstory below)",
+         innerL, top, FG_DIM, true);
+      int storyTop = top + 110;       // below the seed editor + save/regen row
+      g.drawString(this.font, "Backstory", innerL, storyTop, FG_DIM, true);
+      String bs = v.backstory() == null || v.backstory().isBlank() ? "(none yet)" : v.backstory();
+      List<FormattedCharSequence> wrapped = this.font.split(Component.literal(bs), innerR - innerL);
+      int by = storyTop + 12;
+      for (FormattedCharSequence seq : wrapped) {
+         if (by + this.font.lineHeight > bottom) break;
+         g.drawString(this.font, seq, innerL, by, FG_PRIMARY, true);
+         by += this.font.lineHeight + 2;
+      }
+   }
+
+   private void renderDetailMemoriesBody(GuiGraphics g, TownStateUpdatePayload.VillagerSummary v,
+                                          int innerL, int innerR, int top, int bottom) {
+      // Beliefs preview (2 lines max).
+      g.drawString(this.font, "Beliefs (auto-updated nightly)", innerL, top, FG_DIM, true);
+      String beliefs = v.beliefs() == null || v.beliefs().isBlank() ? "(none yet)" : v.beliefs();
+      List<FormattedCharSequence> beliefLines = this.font.split(Component.literal(beliefs), innerR - innerL - 110);
+      int by = top + 12;
+      int beliefsMax = 2;
+      for (int i = 0; i < beliefLines.size() && i < beliefsMax; i++) {
+         g.drawString(this.font, beliefLines.get(i), innerL, by, FG_PRIMARY, true);
+         by += this.font.lineHeight + 1;
+      }
+      if (beliefLines.size() > beliefsMax) {
+         g.drawString(this.font, "… (" + (beliefLines.size() - beliefsMax) + " more lines — Expand)",
+            innerL, by, FG_FAINT, true);
+      }
+
+      // Stats line.
+      int openTodos = (int) v.todos().stream().filter(t -> "open".equals(t.status())).count();
+      String stats = String.format(Locale.ROOT,
+         "memories: %d • compacted day %d • todos: %d open • pins: %d/100",
+         v.memoryCount(), v.lastCompactedDay(), openTodos, v.pinnedFacts().size());
+      g.drawString(this.font, stats, innerL, top + 48, FG_FAINT, true);
+
+      // Pinned facts list (scrollable).
+      int listTop = top + DETAIL_MEMORIES_LIST_TOP;
+      int listBottom = bottom - 30;
+      int rowH = 22;
+      scaledScissor(g, innerL, listTop, innerR, listBottom);
+      int y = listTop - this.detailTabScroll;
+      g.drawString(this.font,
+         "Pinned facts (" + v.pinnedFacts().size() + "/100)", innerL, y, FG_DIM, true);
+      y += 12;
+      if (v.pinnedFacts().isEmpty()) {
+         g.drawString(this.font, "(none — add below to lock in long-term memories)",
+            innerL, y, FG_FAINT, true);
+      } else {
+         for (TownStateUpdatePayload.PinSummary p : v.pinnedFacts()) {
+            if (y + rowH < listTop) { y += rowH; continue; }
+            if (y > listBottom)     break;
+            g.fill(innerL, y, innerR - 50, y + rowH - 2, ROW_BG);
+            int textFg = "resolved".equals(p.status()) ? FG_RESOLVED : FG_PRIMARY;
+            String shown = truncate(p.text(), (innerR - 50) - innerL - 8);
+            g.drawString(this.font, shown, innerL + 4, y + 3, textFg, true);
+            String tag = "resolved".equals(p.status()) ? "resolved" : ("day " + p.createdDay());
+            g.drawString(this.font, tag, innerL + 4, y + 13, FG_FAINT, true);
+            y += rowH;
+         }
+      }
+      g.disableScissor();
+   }
+
+   private void renderDetailTodosBody(GuiGraphics g, TownStateUpdatePayload.VillagerSummary v,
+                                       int innerL, int innerR, int top, int bottom) {
+      int openTodos = (int) v.todos().stream().filter(t -> "open".equals(t.status())).count();
+      g.drawString(this.font, "Open commitments (" + openTodos + ")", innerL, top, FG_DIM, true);
+      if (openTodos == 0) {
+         g.drawString(this.font, "(nothing on their plate)", innerL, top + 14, FG_FAINT, true);
+         return;
+      }
+      int listTop = top + 14;
+      int rowH = 22;
+      scaledScissor(g, innerL, listTop, innerR, bottom);
+      int y = listTop - this.detailTabScroll;
+      for (var t : v.todos()) {
+         if (!"open".equals(t.status())) continue;
+         if (y + rowH < listTop) { y += rowH; continue; }
+         if (y > bottom)         break;
+         g.fill(innerL, y, innerR - 50, y + rowH - 2, ROW_BG);
+         String txt = truncate(t.text(), innerR - 50 - innerL - 8);
+         g.drawString(this.font, txt, innerL + 4, y + 3, FG_PRIMARY, true);
+         g.drawString(this.font, "day " + t.createdDay(), innerL + 4, y + 13, FG_FAINT, true);
+         y += rowH;
+      }
+      g.disableScissor();
+   }
+
+   private void renderDetailParcelsBody(GuiGraphics g, TownStateUpdatePayload.VillagerSummary v,
+                                         int innerL, int innerR, int top, int bottom) {
+      g.drawString(this.font, "Owned parcels", innerL, top, FG_DIM, true);
+      int y = top + 14;
+      int count = 0;
+      for (var p : this.state.parcels()) {
+         if (!v.uuid().equals(p.ownerUuid())) continue;
+         count++;
+         g.fill(innerL, y, innerR, y + 22 - 2, ROW_BG);
+         net.minecraft.core.BlockPos centre = net.minecraft.core.BlockPos.of(p.centerPos());
+         String head = p.type() + " · " + p.sizeX() + "×" + p.sizeZ() + " @ " + centre.toShortString();
+         g.drawString(this.font, head, innerL + 4, y + 3, FG_PRIMARY, true);
+         g.drawString(this.font, parcelSnapshotText(p), innerL + 4, y + 13, FG_FAINT, true);
+         y += 22;
+         if (y > bottom) break;
+      }
+      if (count == 0) {
+         g.drawString(this.font, "(no parcels owned — use the Surveyor's Stake to mark land)",
+            innerL, y, FG_FAINT, true);
+      }
+   }
+
+   private void renderDetailRelationshipsBody(GuiGraphics g, TownStateUpdatePayload.VillagerSummary v,
+                                               int innerL, int innerR, int top, int bottom) {
+      g.drawString(this.font, "Relationships (derived from tavern conversations + dialogue)",
+         innerL, top, FG_DIM, true);
+      int y = top + 14;
+      // Memory counts by tagged chat partner are server-side data we
+      // don't currently ship in VillagerSummary — render a placeholder
+      // for now, and a TODO note explaining what the next step is. The
+      // Stage 11e chat:<uuid> memory entries DO accumulate; surfacing
+      // them is a future stage.
+      g.drawString(this.font, "Relationship counters arrive in a future stage.",
+         innerL, y, FG_FAINT, true);
+      y += 12;
+      g.drawString(this.font, "Today the data exists (chat:<uuid> memories per banter)", innerL, y, FG_FAINT, true);
+      y += 11;
+      g.drawString(this.font, "but isn't aggregated yet — see Stage 11e for the writers.", innerL, y, FG_FAINT, true);
+   }
+
+   private void renderDetailActionsBody(GuiGraphics g, TownStateUpdatePayload.VillagerSummary v,
+                                         int innerL, int innerR, int top, int bottom) {
+      g.drawString(this.font, "Admin actions", innerL, top, FG_DIM, true);
+      g.drawString(this.font,
+         "Use these levers carefully — most are server-authoritative and instant.",
+         innerL, top + 50, FG_FAINT, true);
+      g.drawString(this.font,
+         "More levers (rename, clear home/job, manual leisure override) coming as server actions are added.",
+         innerL, top + 62, FG_FAINT, true);
    }
 
    private void renderMemories(GuiGraphics graphics, int paneL, int paneR, int top, int bottom) {
