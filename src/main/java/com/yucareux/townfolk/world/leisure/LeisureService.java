@@ -78,6 +78,11 @@ public final class LeisureService {
    /** Gametime of the next WALK re-roll per villager. */
    private static final Map<UUID, Long> NEXT_WALK_REROLL = new ConcurrentHashMap<>();
 
+   /** Per-villager flag: an LLM decision is in flight for today, so
+    *  don't re-fire if the poll comes around again before the response
+    *  arrives. Cleared on day rollover. */
+   private static final Map<UUID, Long> LLM_REQUESTED_DAY = new ConcurrentHashMap<>();
+
    private LeisureService() {}
 
    /** True iff this villager has a leisure plan in flight for the
@@ -98,6 +103,7 @@ public final class LeisureService {
    public static void clearChoice(UUID villager) {
       CHOICES.remove(villager);
       NEXT_WALK_REROLL.remove(villager);
+      LLM_REQUESTED_DAY.remove(villager);
    }
 
    @SubscribeEvent
@@ -132,10 +138,34 @@ public final class LeisureService {
                 && dayTick >= DECISION_TICK
                 && dayTick < 9500L                     // small grace into evening
                 && comp.playerSetHome()) {
+               // 1) Heuristic decision NOW — drives movement immediately so
+               //    we don't wait on LLM latency. The choice may be replaced
+               //    in flight if the LLM disagrees (villager "changes their
+               //    mind"); narratively fine.
                LeisureChoice chosen = chooseHeuristic(level, v, comp, activeTaverns);
                CHOICES.put(v.getUUID(), chosen);
                existing = chosen;
-               onChoiceMade(level, town, v, entry, chosen);
+               onChoiceMade(level, town, v, entry, chosen, false);
+
+               // 2) Fire LLM async — if it returns a different option,
+               //    overwrite the choice + re-emit log/memory. Skip the
+               //    LLM call if we've already fired one today (guard
+               //    against re-poll storms before the response arrives).
+               int occupants = countNearTaverns(level, activeTaverns);
+               Long llmDay = LLM_REQUESTED_DAY.get(v.getUUID());
+               if (llmDay == null || llmDay != today) {
+                  LLM_REQUESTED_DAY.put(v.getUUID(), today);
+                  final TownSquareBlockEntity finalTown = town;
+                  final VillagerEntry finalEntry = entry;
+                  final Villager finalV = v;
+                  final LeisureActivity heuristicPick = chosen.activity();
+                  final long requestedDay = today;
+                  LeisureChooser.choose(level, v, entry, comp,
+                        activeTaverns, occupants, heuristicPick)
+                     .thenAcceptAsync(result -> applyLlmResult(level, finalTown,
+                        finalV, finalEntry, requestedDay, result),
+                        level.getServer());
+               }
             }
 
             if (existing == null) continue;
@@ -195,7 +225,8 @@ public final class LeisureService {
                                      TownSquareBlockEntity town,
                                      Villager v,
                                      VillagerEntry entry,
-                                     LeisureChoice choice) {
+                                     LeisureChoice choice,
+                                     boolean fromLlm) {
       long day = level.getGameTime() / 24000L;
       String where = choice.activity().label();
       String name = entry.name();
@@ -213,8 +244,53 @@ public final class LeisureService {
          "After work I chose " + where + ". " + choice.reasoning());
 
       VerboseLog.write("LEISURE_CHOICE",
-         "villager=" + name + " day=" + day + " activity=" + choice.activity().name(),
+         "villager=" + name + " day=" + day + " activity=" + choice.activity().name()
+            + " source=" + (fromLlm ? "llm" : "heuristic"),
          "reasoning=" + choice.reasoning());
+   }
+
+   /** Applies an LLM-returned decision on the server thread, called
+    *  via thenAcceptAsync(executor=level.getServer()). If the LLM
+    *  picked the SAME option as the heuristic, only the reasoning
+    *  string is enriched (no TownLog spam). If it picked DIFFERENTLY,
+    *  the choice is replaced and a follow-up TownLog line is written
+    *  ("Klaus changes his mind — heads home instead."). */
+   private static void applyLlmResult(ServerLevel level,
+                                       TownSquareBlockEntity town,
+                                       Villager v,
+                                       VillagerEntry entry,
+                                       long requestedDay,
+                                       LeisureChooser.Result result) {
+      if (result == null || !result.fromLlm()) return;
+      LeisureChoice existing = CHOICES.get(v.getUUID());
+      if (existing == null || existing.day() != requestedDay) return;
+      if (existing.activity() == result.activity()) {
+         // Same pick — just enrich reasoning + memory.
+         LeisureChoice updated = new LeisureChoice(existing.day(), existing.activity(),
+            result.reasoning(), existing.targetPos());
+         CHOICES.put(v.getUUID(), updated);
+         long day = level.getGameTime() / 24000L;
+         MemoryStore.write(v, "leisure", day,
+            "After work I chose " + existing.activity().label() + ". " + result.reasoning());
+         VerboseLog.write("LEISURE_LLM_CONFIRM",
+            "villager=" + entry.name() + " day=" + day
+               + " activity=" + existing.activity().name(),
+            "reasoning=" + result.reasoning());
+         return;
+      }
+      // Different pick — override movement, re-emit chat line.
+      BlockPos newTarget = null;
+      if (result.activity() == LeisureActivity.TAVERN) {
+         var taverns = activeTavernsInLevel(level);
+         if (!taverns.isEmpty()) newTarget = tavernInteriorCentre(taverns.get(0));
+      }
+      LeisureChoice updated = new LeisureChoice(existing.day(), result.activity(),
+         result.reasoning(), newTarget);
+      CHOICES.put(v.getUUID(), updated);
+      NEXT_WALK_REROLL.remove(v.getUUID());
+      // Cancel any in-flight nav so the new target is picked up cleanly.
+      if (v.getNavigation().isInProgress()) v.getNavigation().stop();
+      onChoiceMade(level, town, v, entry, updated, true);
    }
 
    // ──────────────────── Per-activity executors ────────────────────
