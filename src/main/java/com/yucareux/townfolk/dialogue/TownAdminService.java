@@ -588,7 +588,9 @@ public final class TownAdminService {
             component.playerSetHome(), component.playerSetJob(),
             invOut,
             profession,
-            component.hunger()
+            component.hunger(),
+            component.gender().wireKey(),
+            component.ageDays()
          ));
          // Tally for overview counters. "sleeping" is authoritative;
          // anything else with an activity != "idle" is working; the

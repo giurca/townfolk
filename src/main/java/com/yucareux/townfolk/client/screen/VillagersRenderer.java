@@ -121,6 +121,20 @@ final class VillagersRenderer {
          g.drawString(font, anchor, x + VILL_CELL_W - aw - 4, y + 2, UiTheme.MUTED, true);
       }
 
+      // Stage 18a: gender glyph top-left (next to status pip), age-
+      // category icon at bottom-left for non-adults.
+      var gender = com.yucareux.townfolk.villager.Gender.fromWire(v.gender());
+      int genderColor = gender == com.yucareux.townfolk.villager.Gender.FEMALE
+         ? 0xFFE89AC0 : 0xFF7AB0E0;
+      g.drawString(font, gender.glyph(), x + 10, y + 2, genderColor, true);
+      var ageCat = com.yucareux.townfolk.villager.AgeCategory.fromDays(v.ageDays());
+      if (ageCat != com.yucareux.townfolk.villager.AgeCategory.ADULT) {
+         String tag = ageCat.isChild() ? "child"
+                    : ageCat.isAdolescent() ? "teen"
+                    : "elder";
+         g.drawString(font, tag, x + 4, y + VILL_CELL_H - 11, UiTheme.FAINT, true);
+      }
+
       int iconX = x + (VILL_CELL_W - 16) / 2;
       int iconY = y + 12;
       g.renderItem(screen.iconForProfession(v.profession()), iconX, iconY);

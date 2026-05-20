@@ -174,7 +174,12 @@ public record TownStateUpdatePayload(
       // ── new for Villagers-tab filter/sort ──
       String profession,        // "none" / "farmer" / "shepherd" / "butcher" / "mason"
       // ── Stage 12a: hunger 0..100, 100 = full, 0 = starving ──
-      int hunger
+      int hunger,
+      // ── Stage 18a: identity stripe ──
+      // gender ∈ {"male","female"}; ageDays starts at 200 (adult) for
+      // pre-18a saves, ticks +1 per game day at dawn via ScheduleService.
+      String gender,
+      int ageDays
    ) {}
 
    private static final int MAX_LOG_MESSAGE_CHARS = 4096;
@@ -341,6 +346,8 @@ public record TownStateUpdatePayload(
             for (ItemCount ic : s.inventory()) ITEM_CODEC.encode(buf, ic);
             buf.writeUtf(s.profession());
             buf.writeVarInt(s.hunger());
+            buf.writeUtf(s.gender());
+            buf.writeVarInt(s.ageDays());
          },
          buf -> {
             UUID id = buf.readUUID();
@@ -373,9 +380,11 @@ public record TownStateUpdatePayload(
             for (int i = 0; i < invN; i++) inv.add(ITEM_CODEC.decode(buf));
             String profession = buf.readUtf();
             int hunger = buf.readVarInt();
+            String gender = buf.readUtf();
+            int ageDays = buf.readVarInt();
             return new VillagerSummary(id, name, role, seed, backstory, alive,
                calls, inT, outT, cost, beliefs, pins, recentCount, lastCompact, todos,
-               packedPos, hp, maxHp, act, ph, pj, inv, profession, hunger);
+               packedPos, hp, maxHp, act, ph, pj, inv, profession, hunger, gender, ageDays);
          }
       );
 

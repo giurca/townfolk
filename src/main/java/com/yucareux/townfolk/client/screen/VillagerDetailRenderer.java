@@ -107,14 +107,24 @@ final class VillagerDetailRenderer {
 
       // Profession icon (16×16) on the left, name beside it.
       g.renderItem(screen.iconForProfession(v.profession()), innerL, top);
+      // Stage 18a: name gains a gender glyph prefix and age-category
+      // suffix when the villager isn't a default-adult. Glyph carries
+      // a colour hint so the strip reads at-a-glance.
+      var gender = com.yucareux.townfolk.villager.Gender.fromWire(v.gender());
+      var ageCat = com.yucareux.townfolk.villager.AgeCategory.fromDays(v.ageDays());
+      int genderColor = gender == com.yucareux.townfolk.villager.Gender.FEMALE
+         ? 0xFFE89AC0 : 0xFF7AB0E0;
+      g.drawString(font, gender.glyph(), innerL + 22, top + 2, genderColor, true);
+      int nameX = innerL + 22 + font.width(gender.glyph()) + 4;
       String name = v.name() + (v.alive() ? "" : " ✝");
       g.drawString(font,
          Component.literal(name).withStyle(ChatFormatting.GOLD),
-         innerL + 22, top + 2, UiTheme.HEADING, true);
+         nameX, top + 2, UiTheme.HEADING, true);
       String profLine = (v.profession() == null || v.profession().isBlank() || "none".equals(v.profession())
                        ? "(unemployed)" : v.profession())
                      + (v.role() == null || v.role().isBlank() || "resident".equals(v.role())
-                        ? "" : " · " + v.role());
+                        ? "" : " · " + v.role())
+                     + " · " + ageCat.displayLabel() + " (" + v.ageDays() + "d)";
       g.drawString(font, profLine, innerL + 22, top + 12, UiTheme.MUTED, true);
 
       // Status pills row.
