@@ -1549,6 +1549,23 @@ public final class TownAdminScreen extends Screen {
             rebuildAdminWidgets();
             return true;
          }
+         // Detail Parcels tab — click a row to open its planner.
+         if (this.detailTab == DetailTab.PARCELS) {
+            String parcelId = hitTestDetailParcelRow(mouseX, mouseY);
+            if (parcelId != null) {
+               var p = findParcel(parcelId);
+               if (p != null) {
+                  if ("PLANT".equals(p.type())) {
+                     PacketDistributor.sendToServer(
+                        AdminActionPayload.openParcelEditor(townPos(), parcelId));
+                  } else {
+                     PacketDistributor.sendToServer(
+                        AdminActionPayload.openAnimalPlan(townPos(), parcelId));
+                  }
+                  return true;
+               }
+            }
+         }
       }
 
       return super.mouseClicked(mouseX, mouseY, button);
@@ -3339,26 +3356,63 @@ public final class TownAdminScreen extends Screen {
       g.disableScissor();
    }
 
+   /** Y bounds of each rendered parcel row inside the Detail Parcels
+    *  tab. Populated by {@link #renderDetailParcelsBody}, consumed by
+    *  the click handler so clicking a row opens the appropriate
+    *  planner (CropPlan for PLANT, AnimalPlan for ANIMAL). */
+   private final java.util.LinkedHashMap<String, int[]> detailParcelRowRects =
+      new java.util.LinkedHashMap<>();
+
    private void renderDetailParcelsBody(GuiGraphics g, TownStateUpdatePayload.VillagerSummary v,
                                          int innerL, int innerR, int top, int bottom) {
-      g.drawString(this.font, "Owned parcels", innerL, top, FG_DIM, true);
+      detailParcelRowRects.clear();
+      g.drawString(this.font, "Owned parcels — click a row to open the planner",
+         innerL, top, FG_DIM, true);
       int y = top + 14;
       int count = 0;
+      int rowH = 22;
+      // Read mouse position via the Minecraft handle so hover state
+      // colors the row the player's about to click. Same trick the
+      // Trade-cell renderer uses.
+      double mxd = this.minecraft.mouseHandler.xpos()
+         * (double) this.minecraft.getWindow().getGuiScaledWidth()
+         / (double) this.minecraft.getWindow().getScreenWidth();
+      double myd = this.minecraft.mouseHandler.ypos()
+         * (double) this.minecraft.getWindow().getGuiScaledHeight()
+         / (double) this.minecraft.getWindow().getScreenHeight();
       for (var p : this.state.parcels()) {
          if (!v.uuid().equals(p.ownerUuid())) continue;
+         if (y + rowH > bottom) break;
          count++;
-         g.fill(innerL, y, innerR, y + 22 - 2, ROW_BG);
+         boolean hovered = mxd >= innerL && mxd < innerR && myd >= y && myd < y + rowH - 2;
+         g.fill(innerL, y, innerR, y + rowH - 2, hovered ? TAB_ACTIVE_BG : ROW_BG);
          net.minecraft.core.BlockPos centre = net.minecraft.core.BlockPos.of(p.centerPos());
          String head = p.type() + " · " + p.sizeX() + "×" + p.sizeZ() + " @ " + centre.toShortString();
          g.drawString(this.font, head, innerL + 4, y + 3, FG_PRIMARY, true);
          g.drawString(this.font, parcelSnapshotText(p), innerL + 4, y + 13, FG_FAINT, true);
-         y += 22;
-         if (y > bottom) break;
+         // Right-side hint chip.
+         String hint = "PLANT".equals(p.type()) ? "Open crop plan ▸" : "Open animal plan ▸";
+         g.drawString(this.font, hint, innerR - this.font.width(hint) - 4, y + 8, FG_ACCENT, true);
+         detailParcelRowRects.put(p.id(), new int[]{innerL, y, innerR - innerL, rowH - 2});
+         y += rowH;
       }
       if (count == 0) {
          g.drawString(this.font, "(no parcels owned — use the Surveyor's Stake to mark land)",
             innerL, y, FG_FAINT, true);
       }
+   }
+
+   /** Hit-test the Detail Parcels tab. Returns the parcel id under
+    *  the cursor, or null if none. */
+   private String hitTestDetailParcelRow(double mouseX, double mouseY) {
+      for (var e : detailParcelRowRects.entrySet()) {
+         int[] r = e.getValue();
+         if (mouseX >= r[0] && mouseX < r[0] + r[2]
+             && mouseY >= r[1] && mouseY < r[1] + r[3]) {
+            return e.getKey();
+         }
+      }
+      return null;
    }
 
    private void renderDetailRelationshipsBody(GuiGraphics g, TownStateUpdatePayload.VillagerSummary v,
