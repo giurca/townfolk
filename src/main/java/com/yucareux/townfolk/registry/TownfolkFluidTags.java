@@ -37,20 +37,28 @@ public final class TownfolkFluidTags {
          ResourceLocation.fromNamespaceAndPath(Townfolk.MODID, path));
    }
 
+   // Stage 23 audit P0 fix: tag paths are *registry-scoped*, so the
+   // "fluid/" prefix would have nested inside the registry directory
+   // (data/townfolk/tags/fluid/fluid/water.json) — mirror the
+   // TownfolkItemTags convention of bare names (no "item/" prefix
+   // there either). Tag IDs are scoped by registry so e.g.
+   // "townfolk:water" as a Fluid tag doesn't collide with the same
+   // string as an Item tag.
+
    /** Plain water + anything the player wants treated as water-like
     *  for irrigation / drinking purposes. */
-   public static final TagKey<Fluid> FLUID_WATER = tag("fluid/water");
+   public static final TagKey<Fluid> FLUID_WATER = tag("water");
 
    /** Lava + magma-like fluids that the LLM should treat as
     *  dangerous / fuel-grade. */
-   public static final TagKey<Fluid> FLUID_LAVA = tag("fluid/lava");
+   public static final TagKey<Fluid> FLUID_LAVA = tag("lava");
 
    /** Edible / brewed fluids — milk, honey, beer, Create's chocolate.
     *  Used by future tavern/brewery flavour systems. */
-   public static final TagKey<Fluid> FLUID_DRINKABLE = tag("fluid/drinkable");
+   public static final TagKey<Fluid> FLUID_DRINKABLE = tag("drinkable");
 
    /** Catch-all for any registered fluid that doesn't fit the above —
     *  oil, magma, Create's potion, Mekanism's gases-as-fluids. The
     *  LLM still gets a generic verb against these via fluid id. */
-   public static final TagKey<Fluid> FLUID_INDUSTRIAL = tag("fluid/industrial");
+   public static final TagKey<Fluid> FLUID_INDUSTRIAL = tag("industrial");
 }

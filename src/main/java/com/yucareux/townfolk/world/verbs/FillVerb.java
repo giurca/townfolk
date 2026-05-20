@@ -54,31 +54,53 @@ public final class FillVerb {
       String fluidHint = m.group(2).trim().toLowerCase(Locale.ROOT);
       String labelHint = m.group(3) == null ? "" : m.group(3).trim();
 
-      // The held stack must expose IFluidHandlerItem. Check main hand,
-      // then off hand, then bag.
-      ItemStack sourceStack = ctx.actor().getMainHandItem();
-      IFluidHandlerItem source = FluidIndex.onStack(sourceStack);
+      // The held stack must expose IFluidHandlerItem AND contain
+      // something to pour. Audit P1 fix: walk main → off → bag and
+      // prefer the first NON-EMPTY fluid container. Without the
+      // non-empty preference, a leading empty bucket in slot 0 would
+      // win and the verb would fail "my container is empty" even
+      // though the villager has a full bucket later in the bag.
+      ItemStack sourceStack = null;
+      IFluidHandlerItem source = null;
+      var probe = FluidIndex.onStack(ctx.actor().getMainHandItem());
+      if (probe != null && !FluidIndex.contents(probe).isEmpty()) {
+         sourceStack = ctx.actor().getMainHandItem();
+         source = probe;
+      }
       if (source == null) {
-         sourceStack = ctx.actor().getOffhandItem();
-         source = FluidIndex.onStack(sourceStack);
+         probe = FluidIndex.onStack(ctx.actor().getOffhandItem());
+         if (probe != null && !FluidIndex.contents(probe).isEmpty()) {
+            sourceStack = ctx.actor().getOffhandItem();
+            source = probe;
+         }
       }
       if (source == null) {
          var inv = ctx.actor().getInventory();
          for (int i = 0; i < inv.getContainerSize() && source == null; i++) {
             ItemStack s = inv.getItem(i);
-            source = FluidIndex.onStack(s);
-            if (source != null) sourceStack = s;
+            IFluidHandlerItem probeBag = FluidIndex.onStack(s);
+            if (probeBag != null && !FluidIndex.contents(probeBag).isEmpty()) {
+               source = probeBag;
+               sourceStack = s;
+            }
          }
       }
       if (source == null) {
          ActionFeedback.recordFail(ctx.actor().getUUID(), ctx.level().getGameTime(),
-            "fill — no fluid container in my bag (need a bucket-like item)");
+            "fill — no non-empty fluid container in my bag");
          return;
       }
       FluidStack inSource = FluidIndex.contents(source);
-      if (inSource.isEmpty()) {
+      // Audit P1 fix: validate fluidHint against the source's actual
+      // fluid. If the LLM says "fill water" but we're carrying lava,
+      // refuse rather than silently pumping lava into the irrigation
+      // tank. Substring match against the localized name covers
+      // modded "Flowing Water" / "Whole Milk" naming.
+      if (!fluidHint.isEmpty()
+          && !inSource.getHoverName().getString().toLowerCase(Locale.ROOT).contains(fluidHint)) {
          ActionFeedback.recordFail(ctx.actor().getUUID(), ctx.level().getGameTime(),
-            "fill — my container is empty");
+            "fill — my container holds " + inSource.getHoverName().getString()
+               + ", not " + fluidHint);
          return;
       }
 
@@ -98,19 +120,51 @@ public final class FillVerb {
          return;
       }
 
-      // Build the transfer attempt.
-      FluidStack draftMax = inSource.copy();
-      draftMax.setAmount(Math.min(amount, inSource.getAmount()));
-      int filled = target.fill(draftMax, IFluidHandler.FluidAction.EXECUTE);
-      if (filled <= 0) {
+      // Audit P1 fix: vanilla BucketItem's FluidBucketWrapper is
+      // all-or-nothing on drain — requesting 800mB returns EMPTY,
+      // not a partial. Without care the tank gains 800mB while the
+      // bucket stays full = duplication. The correct dance:
+      //
+      //   1. Simulate the tank fill at our intended amount → learn
+      //      how much it would accept (`tankWillAccept`).
+      //   2. Simulate a source drain at that amount → learn what
+      //      the source ACTUALLY allows pulling (`sourceWillGive`).
+      //      For a bucket this snaps to 0 or 1000.
+      //   3. Take the min of the two; EXECUTE drain on the source
+      //      first, then EXECUTE fill on the tank.
+      //
+      // If sourceWillGive == 0 (e.g. bucket can't partial-drain to
+      // fit a half-full tank), refuse the action so neither side
+      // moves. No duplication path remains.
+      FluidStack draftRequest = inSource.copy();
+      draftRequest.setAmount(Math.min(amount, inSource.getAmount()));
+      int tankWillAccept = target.fill(draftRequest.copy(), IFluidHandler.FluidAction.SIMULATE);
+      if (tankWillAccept <= 0) {
          ActionFeedback.recordFail(ctx.actor().getUUID(), ctx.level().getGameTime(),
             "fill — tank rejected the fluid (wrong type, or full)");
          return;
       }
-      // Decrement the source container by the actual filled amount.
-      FluidStack drainSpec = inSource.copy();
-      drainSpec.setAmount(filled);
-      source.drain(drainSpec, IFluidHandler.FluidAction.EXECUTE);
+      FluidStack drainSimSpec = inSource.copy();
+      drainSimSpec.setAmount(tankWillAccept);
+      FluidStack sourceWillGive = source.drain(drainSimSpec, IFluidHandler.FluidAction.SIMULATE);
+      if (sourceWillGive.isEmpty()) {
+         ActionFeedback.recordFail(ctx.actor().getUUID(), ctx.level().getGameTime(),
+            "fill — my bucket can't pour a partial amount (tank only had room for "
+               + tankWillAccept + "mB)");
+         return;
+      }
+      int moveAmount = Math.min(tankWillAccept, sourceWillGive.getAmount());
+      FluidStack drainExec = inSource.copy();
+      drainExec.setAmount(moveAmount);
+      FluidStack drained = source.drain(drainExec, IFluidHandler.FluidAction.EXECUTE);
+      int filled = target.fill(drained, IFluidHandler.FluidAction.EXECUTE);
+      // Sanity: if filled < drained.getAmount() something off-spec
+      // happened (race?) — return the unfilled remainder to the source.
+      if (filled < drained.getAmount()) {
+         FluidStack refund = drained.copy();
+         refund.setAmount(drained.getAmount() - filled);
+         source.fill(refund, IFluidHandler.FluidAction.EXECUTE);
+      }
 
       StorageRegistry.touch(ctx.level(), targetPos, ctx.self().name(), ctx.level().getGameTime());
       String fluidName = inSource.getHoverName().getString();
