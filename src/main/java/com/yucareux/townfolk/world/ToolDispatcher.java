@@ -57,146 +57,169 @@ public final class ToolDispatcher {
       return new ParseResult(sb.toString().replaceAll("\\s+", " ").trim(), found);
    }
 
+   // ─────────────────────── Verb registry ───────────────────────
+   //
+   // Each verb entry is matched against the lowercased action text in
+   // declaration order; first match wins. Body = everything after the
+   // matched keyword, with leading ":" / whitespace stripped — every
+   // handler that needs args reads the same normalized form.
+   //
+   // Stage 16b.1: collapse the if/else chain into a typed registry.
+   // Stage 16b.2 will move each handler into its own world/verbs/*Verb.java.
+
+   /** Context bundle handed to every verb handler. {@code verbKey} is
+    *  the canonical first keyword of the matched VerbDef (used for
+    *  ReflexService.onAfterVerb); {@code body} is the args after the
+    *  matched verb keyword, normalized. */
+   public record VerbContext(ServerLevel level, TownSquareBlockEntity town,
+                              Villager actor, VillagerEntry self,
+                              String verbKey, String body, String actionRaw) {}
+
+   @FunctionalInterface
+   public interface VerbHandler {
+      void run(VerbContext ctx);
+   }
+
+   /** One row in the dispatch table. {@code keywords} is the list of
+    *  aliases the LLM might use ("claim_home" / "claim home" / "claim_bed").
+    *  Match is "equals OR startsWith(kw + ' ')" — strict-prefix to avoid
+    *  e.g. "forget_parcels" matching the "forget" branch. */
+   private record VerbDef(String[] keywords, boolean isBlockTask,
+                           boolean suppressAfterReflex, VerbHandler handler) {
+      /** Returns the matched keyword (longest within this def's aliases) or null.
+       *  Accepts {@code action == kw}, {@code "kw "}, or {@code "kw:"} — the
+       *  latter covers LLM emissions like {@code "give:Player: 1 wheat"} or
+       *  {@code "completed:fetch hoe"}. The body extractor strips the
+       *  leading {@code ':'} so handlers see a clean payload. */
+      String matchKeyword(String action) {
+         String best = null;
+         for (String kw : keywords) {
+            boolean match;
+            if (action.equals(kw)) {
+               match = true;
+            } else if (action.length() > kw.length() && action.startsWith(kw)) {
+               char next = action.charAt(kw.length());
+               match = (next == ' ' || next == ':');
+            } else {
+               match = false;
+            }
+            if (match && (best == null || kw.length() > best.length())) best = kw;
+         }
+         return best;
+      }
+   }
+
+   /** Pull the trailing args off a verb-matched action. Strips the
+    *  matched keyword + any leading ":" or whitespace so handlers
+    *  receive a clean payload. */
+   private static String extractBody(String action, String matchedKeyword) {
+      if (action.length() <= matchedKeyword.length()) return "";
+      return action.substring(matchedKeyword.length()).replaceFirst("^[:\\s]+", "").trim();
+   }
+
+   /** Block-task verbs already fire their after:<verb> reflexes via
+    *  BlockTaskQueue's completion listener — listed here just for the
+    *  isBlockTask flag construction below. */
+   private static VerbDef def(String[] kws, boolean blockTask, boolean suppressReflex, VerbHandler h) {
+      return new VerbDef(kws, blockTask, suppressReflex, h);
+   }
+
+   /** Ordered list of verb defs. Longer / more-specific keywords come
+    *  first so "stop following" wins against "stop". */
+   private static final List<VerbDef> VERBS = List.of(
+      // Specific stop-action variants — must precede the bare "work"/"stop" branch.
+      def(new String[]{"stop following", "unfollow"}, false, false, ctx -> {
+         FollowService.stop(ctx.level, ctx.actor.getUUID());
+         log(ctx.level, ctx.town, ctx.self, "stops following");
+      }),
+      def(new String[]{"work", "stop"}, false, false, ctx -> {
+         ctx.actor.getNavigation().stop();
+         log(ctx.level, ctx.town, ctx.self, "stops to work");
+      }),
+
+      def(new String[]{"give"},             false, false, ctx -> doGive(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"claim_home", "claim home", "claim_bed", "claim bed"},
+                                            false, false, ctx -> doClaimHome(ctx.level, ctx.town, ctx.actor, ctx.self)),
+      def(new String[]{"completed", "done"},false, false, ctx -> doComplete(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"sleep"},            false, false, ctx -> doSleep(ctx.level, ctx.town, ctx.actor, ctx.self)),
+      def(new String[]{"follow"},           false, false, ctx -> doFollow(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"craft"},            false, false, ctx -> doCraft(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"deposit"},          true,  false, ctx -> doStorage(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body, true)),
+      def(new String[]{"withdraw"},         true,  false, ctx -> doStorage(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body, false)),
+      def(new String[]{"peek", "inspect"},  true,  false, ctx -> doPeekNearest(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"attack", "defend", "flee"},
+                                            false, false, ctx -> doViolencePlaceholder(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.actionRaw.toLowerCase(Locale.ROOT))),
+      def(new String[]{"hand"},             false, false, ctx -> doHand(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"eat"},              false, false, ctx -> doEat(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"harvest"},          true,  false, ctx -> doHarvest(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"plant"},            true,  false, ctx -> doPlant(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"chop"},             true,  false, ctx -> doChop(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"mine"},             true,  false, ctx -> doMine(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"place"},            true,  false, ctx -> doPlace(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"till"},             true,  false, ctx -> doTill(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"shear"},            true,  false, ctx -> doLivestock(ctx.level, ctx.town, ctx.actor, ctx.self, "shear", ctx.body)),
+      def(new String[]{"milk"},             true,  false, ctx -> doLivestock(ctx.level, ctx.town, ctx.actor, ctx.self, "milk", ctx.body)),
+      def(new String[]{"breed"},            true,  false, ctx -> doLivestock(ctx.level, ctx.town, ctx.actor, ctx.self, "breed", ctx.body)),
+      def(new String[]{"feed"},             true,  false, ctx -> doFeed(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"water"},            true,  false, ctx -> doWater(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"remember", "commit"},
+                                            false, false, ctx -> doRemember(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"reflex", "standing_order", "rule"},
+                                            false, true,  ctx -> doReflex(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.actionRaw)),
+      def(new String[]{"forget_parcel", "drop_parcel", "unbind_parcel"},
+                                            false, true,  ctx -> doForgetParcel(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"forget", "cancel_rule", "drop_reflex"},
+                                            false, true,  ctx -> doForget(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body))
+   );
+
    public static void execute(ServerLevel level, TownSquareBlockEntity town, Villager actor,
                               VillagerEntry self, String actionRaw) {
       String action = actionRaw.toLowerCase(Locale.ROOT).trim();
       VerboseLog.write("ACTION", "actor=" + self.name() + " raw=\"" + actionRaw + "\"", "");
 
-      // Identify the verb keyword once so we can fire after:<verb> reflexes at
-      // the end. Block-task verbs (harvest/plant/chop/mine/place/deposit/
-      // withdraw/peek) fire their own after-hook via BlockTaskQueue's
-      // completion listener — we skip them here to avoid double-firing.
-      String verbKey = firstWord(action);
-      boolean isBlockTaskVerb = switch (verbKey) {
-         case "harvest", "plant", "chop", "mine", "place", "deposit", "withdraw", "peek",
-              "till", "water", "shear", "milk", "feed", "breed" -> true;
-         default -> false;
-      };
+      VerbDef matched = null;
+      String matchedKw = null;
+      for (VerbDef d : VERBS) {
+         String kw = d.matchKeyword(action);
+         if (kw != null) { matched = d; matchedKw = kw; break; }
+      }
+
       try {
-         if (action.startsWith("give")) {
-            doGive(level, town, actor, self, action.substring(4).trim());
-         } else if (action.startsWith("claim_home") || action.startsWith("claim home")
-                 || action.startsWith("claim_bed") || action.startsWith("claim bed")) {
-            doClaimHome(level, town, actor, self);
-         } else if (action.startsWith("completed") || action.startsWith("done")) {
-            int colon = actionRaw.indexOf(':');
-            String what = colon < 0 ? "" : actionRaw.substring(colon + 1).trim();
-            doComplete(level, town, actor, self, what);
-         } else if (action.equals("sleep")) {
-            doSleep(level, town, actor, self);
-         } else if (action.equals("work") || action.equals("stop")) {
-            actor.getNavigation().stop();
-            log(level, town, self, "stops to work");
-         } else if (action.startsWith("follow")) {
-            String target = action.substring(6).trim();
-            doFollow(level, town, actor, self, target);
-         } else if (action.startsWith("stop following") || action.equals("unfollow")) {
-            FollowService.stop(level, actor.getUUID());
-            log(level, town, self, "stops following");
-         } else if (action.startsWith("craft")) {
-            String what = action.substring(5).replaceFirst("^[:\\s]+", "").trim();
-            doCraft(level, town, actor, self, what);
-         } else if (action.startsWith("deposit")) {
-            doStorage(level, town, actor, self, action.substring(7).trim(), true);
-         } else if (action.startsWith("withdraw")) {
-            doStorage(level, town, actor, self, action.substring(8).trim(), false);
-         } else if (action.startsWith("peek") || action.startsWith("inspect")) {
-            int sp = action.indexOf(' ');
-            doPeekNearest(level, town, actor, self, sp < 0 ? "" : action.substring(sp + 1).trim());
-         } else if (action.startsWith("attack") || action.startsWith("defend") || action.equals("flee")) {
-            doViolencePlaceholder(level, town, actor, self, action);
-         } else if (action.startsWith("hand")) {
-            // "hand <item> to <player>"
-            doHand(level, town, actor, self, action.substring(4).trim());
-         } else if (action.equals("eat") || action.startsWith("eat ")) {
-            String hint = action.length() > 3 ? action.substring(3).trim() : "";
-            doEat(level, town, actor, self, hint);
-         } else if (action.startsWith("harvest")) {
-            doHarvest(level, town, actor, self,
-               action.length() > 7 ? action.substring(7).trim() : "");
-         } else if (action.startsWith("plant")) {
-            doPlant(level, town, actor, self,
-               action.length() > 5 ? action.substring(5).trim() : "");
-         } else if (action.startsWith("chop")) {
-            doChop(level, town, actor, self,
-               action.length() > 4 ? action.substring(4).trim() : "");
-         } else if (action.startsWith("mine")) {
-            doMine(level, town, actor, self,
-               action.length() > 4 ? action.substring(4).trim() : "");
-         } else if (action.startsWith("place")) {
-            doPlace(level, town, actor, self,
-               action.length() > 5 ? action.substring(5).trim() : "");
-         } else if (action.startsWith("till")) {
-            doTill(level, town, actor, self,
-               action.length() > 4 ? action.substring(4).trim() : "");
-         } else if (action.startsWith("shear")) {
-            doLivestock(level, town, actor, self, "shear",
-               action.length() > 5 ? action.substring(5).trim() : "");
-         } else if (action.startsWith("milk")) {
-            doLivestock(level, town, actor, self, "milk",
-               action.length() > 4 ? action.substring(4).trim() : "");
-         } else if (action.startsWith("breed")) {
-            doLivestock(level, town, actor, self, "breed",
-               action.length() > 5 ? action.substring(5).trim() : "");
-         } else if (action.startsWith("feed")) {
-            doFeed(level, town, actor, self,
-               action.length() > 4 ? action.substring(4).trim() : "");
-         } else if (action.startsWith("water")) {
-            doWater(level, town, actor, self,
-               action.length() > 5 ? action.substring(5).trim() : "");
-         } else if (action.startsWith("remember") || action.startsWith("commit")) {
-            int sp = action.indexOf(' ');
-            String text = sp < 0 ? "" : action.substring(sp + 1).trim();
-            text = text.replaceFirst("^[:\\s]+", "").trim();
-            doRemember(level, town, actor, self, text);
-         } else if (action.startsWith("reflex") || action.startsWith("standing_order")
-                 || action.startsWith("rule")) {
-            doReflex(level, town, actor, self, actionRaw);
-         } else if (verbExact(action, "forget_parcel") || verbExact(action, "drop_parcel")
-                 || verbExact(action, "unbind_parcel")) {
-            int sp = action.indexOf(' ');
-            String body = sp < 0 ? "" : action.substring(sp + 1).trim();
-            body = body.replaceFirst("^[:\\s]+", "").trim();
-            doForgetParcel(level, town, actor, self, body);
-         } else if (verbExact(action, "forget") || verbExact(action, "cancel_rule")
-                 || verbExact(action, "drop_reflex")) {
-            int sp = action.indexOf(' ');
-            String body = sp < 0 ? "" : action.substring(sp + 1).trim();
-            body = body.replaceFirst("^[:\\s]+", "").trim();
-            doForget(level, town, actor, self, body);
-         } else {
+         if (matched == null) {
             VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=unknown_verb",
                "raw=\"" + actionRaw + "\"");
             town.getTown().log().add(level.getGameTime(), TownLog.Level.INFO,
                self.name() + " unknown action: " + actionRaw);
+         } else {
+            // Pass the matched keyword (not the canonical first alias)
+            // through to the handler + reflex fire so e.g. a player-
+            // authored "after:standing_order" reflex still triggers when
+            // the LLM emits "standing_order …" rather than "reflex …".
+            String body = extractBody(action, matchedKw);
+            matched.handler().run(new VerbContext(level, town, actor, self, matchedKw, body, actionRaw));
          }
       } catch (Exception e) {
          VerboseLog.write("ACTION_ERROR", "actor=" + self.name(),
             "raw=\"" + actionRaw + "\" error=" + e);
       }
-      // Fire after:<verb> reflexes for inline verbs (block-task verbs handle
-      // this themselves via BlockTaskQueue.CompletionListener).
-      if (!isBlockTaskVerb && !verbKey.isEmpty()
-          && !"reflex".equals(verbKey) && !"forget".equals(verbKey)) {
-         ReflexService.onAfterVerb(level, actor, verbKey);
+
+      // Fire after:<verb> reflexes for inline (non-block-task) verbs.
+      // Block-task verbs fire their own after-hook via BlockTaskQueue's
+      // completion listener; reflex/forget are meta-verbs that mutate
+      // the rule store and shouldn't trigger reflexes themselves.
+      if (matched != null && !matched.isBlockTask() && !matched.suppressAfterReflex()) {
+         // matchedKw is the keyword that actually matched (handles
+         // multi-word like "stop following" as well as the firstWord
+         // case ScheduleService used before this refactor).
+         String afterKey = matchedKw.indexOf(' ') < 0
+            ? matchedKw
+            : matchedKw.substring(0, matchedKw.indexOf(' '));
+         ReflexService.onAfterVerb(level, actor, afterKey);
       }
    }
 
-   private static String firstWord(String s) {
-      int sp = s.indexOf(' ');
-      return sp < 0 ? s : s.substring(0, sp);
-   }
-
-   /** True when {@code action} is exactly {@code verb} or starts with
-    *  {@code verb + " "}. Stricter than {@link String#startsWith} —
-    *  prevents {@code "forget_parcels"} from matching the {@code "forget"}
-    *  branch by accident. */
-   private static boolean verbExact(String action, String verb) {
-      if (action.equals(verb)) return true;
-      return action.length() > verb.length()
-          && action.startsWith(verb)
-          && action.charAt(verb.length()) == ' ';
-   }
+   // firstWord / verbExact removed in 16b.1 — VerbDef.matchKeyword
+   // now owns the strict-prefix + alias-match logic.
 
    // ----- give <name>: <count> <item> -----
 
