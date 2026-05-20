@@ -1643,53 +1643,32 @@ public final class ParcelRoutine {
     *  most cares about banking it; products before seeds because seeds are
     *  the working stock we WANT to keep replenishing the inventory with.
     */
-   private record DepositRule(int keep, int triggerAt) {}
+   /** Banking rule: a tag of items that share a keep/trigger policy.
+    *  Membership is data-driven via the {@code townfolk:bank/*} item
+    *  tags ({@link com.yucareux.townfolk.registry.TownfolkItemTags}),
+    *  so any mod-added item joins a category with a JSON edit, not
+    *  a code change. The thresholds (keep / triggerAt) stay in code
+    *  because they encode INTENT, not membership. */
+   private record DepositRuleSpec(net.minecraft.tags.TagKey<net.minecraft.world.item.Item> tag,
+                                  int keep, int triggerAt) {}
 
-   private static final java.util.Map<String, DepositRule> DEPOSIT_RULES;
-   static {
-      java.util.Map<String, DepositRule> m = new java.util.LinkedHashMap<>();
-      // RULE DESIGN: keep a meaningful gap between triggerAt and keep so
-      // a single trip moves a batch worth banking, not one or two items.
-      // (Previous tight rules — e.g. seeds keep=64, triggerAt=65 — fired
-      // after every harvest that yielded ≥1 seed, producing the
-      // "harvest one stalk, walk to barrel, repeat" loop.)
-
-      // Wheat: deposit at every half-stack, empty the bag.
-      m.put("minecraft:wheat",          new DepositRule(0, 32));
-      // Bread: rare in autonomous play (no auto-bake), bank any if it appears.
-      m.put("minecraft:bread",          new DepositRule(0, 4));
-      // Wool: every dye colour. ~half a sheep's worth (1-3 per shear, so
-      // 8 ≈ 3-4 sheep) per trip.
-      for (var c : net.minecraft.world.item.DyeColor.values()) {
-         m.put("minecraft:" + c.getName() + "_wool", new DepositRule(0, 8));
-      }
-      // Animal products. Milk is a single-bucket item — deposit every
-      // bucket immediately so the cow-task gate (which skips ready cows
-      // when the villager is already holding milk) clears quickly.
-      m.put("minecraft:milk_bucket",    new DepositRule(0, 1));
-      m.put("minecraft:egg",            new DepositRule(0, 16));
-      m.put("minecraft:leather",        new DepositRule(0, 8));
-      m.put("minecraft:feather",        new DepositRule(0, 16));
-      m.put("minecraft:rabbit_hide",    new DepositRule(0, 8));
-      // Meat-style items are bulk; bigger trigger so trips are worth it.
-      m.put("minecraft:beef",           new DepositRule(0, 8));
-      m.put("minecraft:porkchop",       new DepositRule(0, 8));
-      m.put("minecraft:chicken",        new DepositRule(0, 8));
-      m.put("minecraft:rabbit",         new DepositRule(0, 8));
-      m.put("minecraft:mutton",         new DepositRule(0, 8));
-      // Crops that double as their own seed — keep enough to replant a
-      // patch, bank when surplus is ~half a stack so trips are worthwhile.
-      m.put("minecraft:carrot",         new DepositRule(16, 48));
-      m.put("minecraft:potato",         new DepositRule(16, 48));
-      m.put("minecraft:beetroot",       new DepositRule(0, 32));
-      // Seeds: never carry more than ~1 stack long-term. Allow up to 96
-      // before a trip — that's 32 seeds of slack — so a single trip
-      // banks ~32 seeds back down to a 64-stack rather than running to
-      // the barrel after every harvest that yielded a single seed.
-      m.put("minecraft:wheat_seeds",    new DepositRule(64, 96));
-      m.put("minecraft:beetroot_seeds", new DepositRule(64, 96));
-      DEPOSIT_RULES = java.util.Collections.unmodifiableMap(m);
-   }
+   private static final java.util.List<DepositRuleSpec> DEPOSIT_RULES = java.util.List.of(
+      // Animal products: milk-bucket-style "bank immediately." The cow-
+      // task gate skips ready cows when the villager is already holding
+      // milk, so we want milk out of the bag the moment it lands.
+      new DepositRuleSpec(com.yucareux.townfolk.registry.TownfolkItemTags.BANK_ANIMAL_PRODUCT_IMMEDIATE, 0, 1),
+      // Animal products that drop in stacks — eggs, leather, meats.
+      new DepositRuleSpec(com.yucareux.townfolk.registry.TownfolkItemTags.BANK_ANIMAL_PRODUCT_BULK, 0, 8),
+      // Wool of any colour — half a sheep's worth per trip.
+      new DepositRuleSpec(com.yucareux.townfolk.registry.TownfolkItemTags.BANK_WOOL, 0, 8),
+      // Bulk grain (wheat, beetroot, bread) — empty the bag at half-stack.
+      new DepositRuleSpec(com.yucareux.townfolk.registry.TownfolkItemTags.BANK_GRAIN, 0, 32),
+      // Crops that double as their own seed — keep a replant reserve.
+      new DepositRuleSpec(com.yucareux.townfolk.registry.TownfolkItemTags.BANK_CROPS_SEED_DOUBLING, 16, 48),
+      // Seeds — never carry more than ~1 stack long-term; 32 slack between
+      // trips so a single banking trip is worthwhile.
+      new DepositRuleSpec(com.yucareux.townfolk.registry.TownfolkItemTags.BANK_SEEDS_BULK, 64, 96)
+   );
 
    /** Resolve a deposit destination for {@code item} in two steps:
     *
@@ -1743,50 +1722,66 @@ public final class ParcelRoutine {
    private static boolean tryDepositSurplus(WorkProductionService.Ctx ctx,
                                             InventorySnapshot snap, boolean ignoreTrigger) {
       StringBuilder trace = new StringBuilder();
-      for (var e : DEPOSIT_RULES.entrySet()) {
-         DepositRule rule = e.getValue();
-         int have = snap.countOf(e.getKey());
-         if (have == 0) continue;                          // silent: don't spam zero entries
-         boolean triggerOk = ignoreTrigger || have >= rule.triggerAt();
-         int surplus = have - rule.keep();
-         if (!triggerOk) {
-            trace.append(e.getKey()).append("(have=").append(have)
-                 .append(", trigger=").append(rule.triggerAt()).append(") ");
-            continue;
+      // For each banking-rule tag (top-down priority), walk the inventory
+      // snapshot for items belonging to that tag and apply the rule's
+      // keep / triggerAt thresholds. First successful deposit returns —
+      // the chain listener will re-fire to handle the next item.
+      java.util.Set<String> handledByRule = new java.util.HashSet<>();
+      for (DepositRuleSpec rule : DEPOSIT_RULES) {
+         for (var e : snap.totals().entrySet()) {
+            String itemId = e.getKey();
+            if (handledByRule.contains(itemId)) continue;
+            int have = e.getValue();
+            if (have == 0) continue;
+            net.minecraft.resources.ResourceLocation rl =
+               net.minecraft.resources.ResourceLocation.tryParse(itemId);
+            if (rl == null) continue;
+            Item it = BuiltInRegistries.ITEM.get(rl);
+            if (it == null) continue;
+            ItemStack probe = new ItemStack(it);
+            if (!probe.is(rule.tag())) continue;
+            handledByRule.add(itemId);
+            boolean triggerOk = ignoreTrigger || have >= rule.triggerAt();
+            int surplus = have - rule.keep();
+            if (!triggerOk) {
+               trace.append(itemId).append("(have=").append(have)
+                    .append(", trigger=").append(rule.triggerAt()).append(") ");
+               continue;
+            }
+            if (surplus <= 0) {
+               trace.append(itemId).append("(have=").append(have)
+                    .append(", keep=").append(rule.keep()).append(") ");
+               continue;
+            }
+            var dest = resolveDepositTarget(ctx, it, itemId);
+            if (dest.isEmpty()) {
+               VerboseLog.write("PARCEL_DEPOSIT_NO_DEST", "actor=" + ctx.entry().name()
+                  + " item=" + itemId + " surplus=" + surplus,
+                  "no registered barrel accepts this item — writing [need:barrel_for_X] todo");
+               writeNeedBarrelMemory(ctx, itemId);
+               continue;
+            }
+            // Verb parser takes path-only ids for vanilla items, full id
+            // for modded namespaces, so the resolver doesn't fall through
+            // to a "minecraft:X" miss.
+            String verbItem = "minecraft".equals(rl.getNamespace()) ? rl.getPath() : rl.toString();
+            ToolDispatcher.execute(ctx.level(), ctx.town(), ctx.actor(), ctx.entry(),
+               "deposit " + surplus + " " + verbItem);
+            VerboseLog.write("PARCEL_DEPOSIT", "actor=" + ctx.entry().name()
+               + " item=" + itemId + " count=" + surplus
+               + " ignoreTrigger=" + ignoreTrigger + " ruleTag=" + rule.tag().location(),
+               "dest=" + dest.get().pos().toShortString());
+            return true;
          }
-         if (surplus <= 0) {
-            trace.append(e.getKey()).append("(have=").append(have)
-                 .append(", keep=").append(rule.keep()).append(") ");
-            continue;
-         }
-         Item rulItem = BuiltInRegistries.ITEM.get(net.minecraft.resources.ResourceLocation.parse(e.getKey()));
-         if (rulItem == null) continue;
-         var dest = resolveDepositTarget(ctx, rulItem, e.getKey());
-         if (dest.isEmpty()) {
-            VerboseLog.write("PARCEL_DEPOSIT_NO_DEST", "actor=" + ctx.entry().name()
-               + " item=" + e.getKey() + " surplus=" + surplus,
-               "no registered barrel accepts this item — writing [need:barrel_for_X] todo");
-            writeNeedBarrelMemory(ctx, e.getKey());
-            continue;             // try the next rule before giving up
-         }
-         String itemPath = e.getKey().substring(e.getKey().indexOf(':') + 1);
-         ToolDispatcher.execute(ctx.level(), ctx.town(), ctx.actor(), ctx.entry(),
-            "deposit " + surplus + " " + itemPath);
-         VerboseLog.write("PARCEL_DEPOSIT", "actor=" + ctx.entry().name()
-            + " item=" + itemPath + " count=" + surplus
-            + " ignoreTrigger=" + ignoreTrigger,
-            "dest=" + dest.get().pos().toShortString());
-         return true;
       }
-      // Fallback for mod-added crops/seeds we don't have an explicit
-      // DEPOSIT_RULE for (Immersive Engineering hemp, Farmer's Delight
-      // tomatoes, etc.). If the bag holds an item tagged as a crop or
-      // a seed, treat it as depositable with a default rule
-      // (keep=0, triggerAt=DEFAULT_CROP_TRIGGER) so it can never sit
-      // forever just because we didn't enumerate every modded item id.
+      // Fallback for mod-added crops/seeds the rule tags don't catch
+      // (Immersive Engineering hemp, etc.). If the bag holds an item
+      // tagged as c:crops or c:seeds, treat it as depositable with a
+      // default rule (keep=0, triggerAt=DEFAULT_CROP_TRIGGER) so it
+      // can never sit forever just because no townfolk: tag enumerates it.
       for (var e : snap.totals().entrySet()) {
          String itemId = e.getKey();
-         if (DEPOSIT_RULES.containsKey(itemId)) continue;     // explicit rule already handled above
+         if (handledByRule.contains(itemId)) continue;
          int have = e.getValue();
          if (have <= 0) continue;
          net.minecraft.resources.ResourceLocation rl =
@@ -1984,10 +1979,19 @@ public final class ParcelRoutine {
       // a legitimate drop-off, may as well dump everything"; it must NOT
       // be the reason for the trip.
       boolean meaningful = false;
-      for (var rule : DEPOSIT_RULES.entrySet()) {
-         if (snap.countOf(rule.getKey()) >= rule.getValue().triggerAt()) {
+      outer:
+      for (DepositRuleSpec rule : DEPOSIT_RULES) {
+         for (var en : snap.totals().entrySet()) {
+            int have = en.getValue();
+            if (have < rule.triggerAt()) continue;
+            net.minecraft.resources.ResourceLocation rl =
+               net.minecraft.resources.ResourceLocation.tryParse(en.getKey());
+            if (rl == null) continue;
+            Item it = BuiltInRegistries.ITEM.get(rl);
+            if (it == null) continue;
+            if (!new ItemStack(it).is(rule.tag())) continue;
             meaningful = true;
-            break;
+            break outer;
          }
       }
       if (!meaningful) return;

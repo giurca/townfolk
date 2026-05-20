@@ -1,0 +1,15 @@
+{
+  "_comment": "Animal products that drop in stacks but aren't urgent. Bank every ~8.",
+  "replace": false,
+  "values": [
+    "minecraft:egg",
+    "minecraft:leather",
+    "minecraft:feather",
+    "minecraft:rabbit_hide",
+    "minecraft:beef",
+    "minecraft:porkchop",
+    "minecraft:chicken",
+    "minecraft:mutton",
+    "minecraft:rabbit"
+  ]
+}

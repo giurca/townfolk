@@ -1,0 +1,16 @@
+{
+  "_comment": "Medium-nutrition food (+20 hunger). Raw meats + root vegetables. Anything that fills a villager but isn't a finished dish.",
+  "replace": false,
+  "values": [
+    "minecraft:beef",
+    "minecraft:porkchop",
+    "minecraft:chicken",
+    "minecraft:mutton",
+    "minecraft:rabbit",
+    "minecraft:cod",
+    "minecraft:salmon",
+    "minecraft:carrot",
+    "minecraft:potato",
+    "minecraft:baked_potato"
+  ]
+}

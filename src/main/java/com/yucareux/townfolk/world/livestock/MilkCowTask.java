@@ -31,7 +31,10 @@ public final class MilkCowTask implements LivestockTask {
    @Override public String toolItemId() { return "minecraft:bucket"; }
 
    @Override public boolean hasTool(Villager v) {
-      return LivestockTask.hasItem(v, "minecraft:bucket");
+      // Tag-driven so any mod-added empty-bucket equivalent (Iron Buckets,
+      // Create's wax buckets, etc.) satisfies the requirement.
+      return LivestockTask.hasToolWithTag(v,
+         com.yucareux.townfolk.registry.TownfolkItemTags.TOOL_MILK_BUCKET);
    }
 
    @Override public boolean ready(ServerLevel level, Animal animal, Villager v) {

@@ -1,0 +1,7 @@
+{
+  "_comment": "Animal products that should be banked the instant the villager has even one. Milk is the canonical case (a bucket can't hold two), but eggs / single-bucket-per-cow style items go here too.",
+  "replace": false,
+  "values": [
+    "minecraft:milk_bucket"
+  ]
+}

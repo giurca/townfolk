@@ -1,0 +1,7 @@
+{
+  "_comment": "Last-resort food (+5 hunger). Raw grain. A villager only eats this when the cooked / vegetable / fruit shelves are bare.",
+  "replace": false,
+  "values": [
+    "minecraft:wheat"
+  ]
+}

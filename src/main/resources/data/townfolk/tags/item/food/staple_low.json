@@ -1,0 +1,15 @@
+{
+  "_comment": "Low-nutrition food (+15 hunger). Fruits, beets, snacks. Filler when the cooked-meat / bread shelves are bare.",
+  "replace": false,
+  "values": [
+    "minecraft:beetroot",
+    "minecraft:apple",
+    "minecraft:melon_slice",
+    "minecraft:sweet_berries",
+    "minecraft:glow_berries",
+    "minecraft:dried_kelp",
+    "farmersdelight:cabbage",
+    "farmersdelight:tomato",
+    "farmersdelight:onion"
+  ]
+}

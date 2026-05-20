@@ -1,0 +1,10 @@
+{
+  "_comment": "Seeds that should accumulate to ~96 before a banking trip — wheat / beetroot seeds drop in singles, so triggering at 32 would mean a barrel trip every couple of harvest swings.",
+  "replace": false,
+  "values": [
+    "minecraft:wheat_seeds",
+    "minecraft:beetroot_seeds",
+    "minecraft:pumpkin_seeds",
+    "minecraft:melon_seeds"
+  ]
+}

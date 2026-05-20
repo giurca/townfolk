@@ -1,0 +1,9 @@
+{
+  "_comment": "Bulk grain. Bank everything once we've got ~32. Don't double as their own seed (those are in crops_seed_doubling).",
+  "replace": false,
+  "values": [
+    "minecraft:wheat",
+    "minecraft:beetroot",
+    "minecraft:bread"
+  ]
+}

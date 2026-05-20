@@ -94,31 +94,20 @@ public final class MealService {
 
    private MealService() {}
 
-   /** Food priority table — item id → hunger restored. Order matters:
-    *  iterated as a list (insertion order) so highest-value items are
-    *  tried first across barrels. Mod-added crops that should count
-    *  as food can be added here without code changes to the eaters. */
-   private static final java.util.LinkedHashMap<String, Integer> FOOD_PRIORITY =
-      new java.util.LinkedHashMap<>();
-   static {
-      FOOD_PRIORITY.put("minecraft:bread",           40);
-      FOOD_PRIORITY.put("minecraft:cooked_beef",     40);
-      FOOD_PRIORITY.put("minecraft:cooked_porkchop", 40);
-      FOOD_PRIORITY.put("minecraft:cooked_chicken",  35);
-      FOOD_PRIORITY.put("minecraft:cooked_mutton",   35);
-      FOOD_PRIORITY.put("minecraft:cooked_rabbit",   30);
-      FOOD_PRIORITY.put("minecraft:beef",            25);
-      FOOD_PRIORITY.put("minecraft:porkchop",        25);
-      FOOD_PRIORITY.put("minecraft:chicken",         20);
-      FOOD_PRIORITY.put("minecraft:mutton",          20);
-      FOOD_PRIORITY.put("minecraft:rabbit",          20);
-      FOOD_PRIORITY.put("minecraft:carrot",          20);
-      FOOD_PRIORITY.put("minecraft:potato",          20);
-      FOOD_PRIORITY.put("minecraft:beetroot",        15);
-      FOOD_PRIORITY.put("minecraft:apple",           15);
-      FOOD_PRIORITY.put("farmersdelight:cabbage",    15);
-      FOOD_PRIORITY.put("minecraft:wheat",            5);   // last resort
-   }
+   /** Food priority tiers — driven by the
+    *  {@link com.yucareux.townfolk.registry.TownfolkItemTags}
+    *  {@code food/staple_*} tags. Tiers are tried top-down: highest-
+    *  nutrition tag scanned first across every registered town barrel
+    *  before moving to the next tier. Adding a new food (mod or
+    *  datapack) is a JSON edit, not a code change. */
+   private record FoodTier(net.minecraft.tags.TagKey<Item> tag, int nutrition) {}
+
+   private static final java.util.List<FoodTier> FOOD_TIERS = java.util.List.of(
+      new FoodTier(com.yucareux.townfolk.registry.TownfolkItemTags.FOOD_STAPLE_HIGH,  40),
+      new FoodTier(com.yucareux.townfolk.registry.TownfolkItemTags.FOOD_STAPLE_MED,   20),
+      new FoodTier(com.yucareux.townfolk.registry.TownfolkItemTags.FOOD_STAPLE_LOW,   15),
+      new FoodTier(com.yucareux.townfolk.registry.TownfolkItemTags.FOOD_STAPLE_GRAIN,  5)
+   );
 
    @SubscribeEvent
    public static void onTick(LevelTickEvent.Post event) {
@@ -179,28 +168,26 @@ public final class MealService {
    private record FoodHit(BlockPos pos, Container container, String itemId, int hungerValue) {}
 
    private static FoodHit findBestFoodInTown(ServerLevel level, BlockPos from) {
-      FoodHit best = null;
-      // For each food id in priority order, check whether any registered
-      // container holds it AND how close it is. Return the first hit
-      // for the highest-priority item — accept slightly-further-but-
-      // better-food, since the player set up the storage.
-      for (var entry : FOOD_PRIORITY.entrySet()) {
-         String itemId = entry.getKey();
-         int hungerValue = entry.getValue();
-         ResourceLocation rl = ResourceLocation.tryParse(itemId);
-         if (rl == null) continue;
-         Item item = BuiltInRegistries.ITEM.get(rl);
-         if (item == null) continue;
-         var nearest = TownTreasury.findNearestWith(level, from, item);
-         if (nearest.isEmpty()) continue;
-         var hit = nearest.get();
-         best = new FoodHit(hit.pos(), hit.config() == null ? null : null, itemId, hungerValue);
-         // Need the live container view to actually mutate the contents.
-         Container c = com.yucareux.townfolk.town.ContainerAdapters.at(level, hit.pos());
-         if (c == null) continue;
-         return new FoodHit(hit.pos(), c, itemId, hungerValue);
+      // Tag-driven food search. For each priority tier (top-down),
+      // scan every registered town barrel for ANY item belonging to
+      // the tier's tag. First hit at the highest tier wins. Modded
+      // food joins via JSON tag membership — no code change here.
+      for (FoodTier tier : FOOD_TIERS) {
+         for (var entry : com.yucareux.townfolk.town.StorageRegistry.entries(level)) {
+            net.minecraft.core.BlockPos pos =
+               net.minecraft.core.BlockPos.of(entry.getKey());
+            Container c = com.yucareux.townfolk.town.ContainerAdapters.at(level, pos);
+            if (c == null) continue;
+            for (int i = 0; i < c.getContainerSize(); i++) {
+               ItemStack s = c.getItem(i);
+               if (s.isEmpty()) continue;
+               if (!s.is(tier.tag())) continue;
+               ResourceLocation rl = BuiltInRegistries.ITEM.getKey(s.getItem());
+               return new FoodHit(pos, c, rl.toString(), tier.nutrition());
+            }
+         }
       }
-      return best == null ? null : best;
+      return null;
    }
 
    private static void consumeAndFeed(ServerLevel level,

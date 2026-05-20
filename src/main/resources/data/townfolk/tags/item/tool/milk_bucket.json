@@ -1,0 +1,8 @@
+{
+  "_comment": "Empty buckets that can hold milk. Vanilla bucket + the cross-mod c:buckets/empty common tag so any tech-mod-added bucket-equivalent works.",
+  "replace": false,
+  "values": [
+    "minecraft:bucket",
+    "#c:buckets/empty"
+  ]
+}

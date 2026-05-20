@@ -1,0 +1,14 @@
+{
+  "_comment": "Highest-nutrition food (+40 hunger). Bread + cooked meats. Datapack can extend with Farmer's Delight / Create / etc. cooked dishes.",
+  "replace": false,
+  "values": [
+    "minecraft:bread",
+    "minecraft:cooked_beef",
+    "minecraft:cooked_porkchop",
+    "minecraft:cooked_chicken",
+    "minecraft:cooked_mutton",
+    "minecraft:cooked_rabbit",
+    "minecraft:cooked_cod",
+    "minecraft:cooked_salmon"
+  ]
+}

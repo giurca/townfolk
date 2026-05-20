@@ -1,0 +1,8 @@
+{
+  "_comment": "Crops that double as their own seed — keep enough to replant a row, bank surplus. Carrots + potatoes are the vanilla case; mod crops with the same property go here too.",
+  "replace": false,
+  "values": [
+    "minecraft:carrot",
+    "minecraft:potato"
+  ]
+}
