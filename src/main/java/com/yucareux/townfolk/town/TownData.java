@@ -70,6 +70,13 @@ public final class TownData {
    private int exchangesTotalToday = 0;
    private long exchangeCounterDay = 0L;
 
+   /** Stage 22 — per-pair affinity, keyed by ordered UUID-pair string
+    *  (use {@link AffinityRecord#key}). Built up by RelationshipService
+    *  as tavern banter accumulates; consumed by BirthService for the
+    *  FRIEND-tier breeding gate and by VillagerDetailRenderer for the
+    *  Relationships tab. */
+   private final Map<String, AffinityRecord> affinities = new HashMap<>();
+
    public TownData(BlockPos townSquarePos) {
       this.townName = "Unnamed Town";
       this.townSquarePos = townSquarePos;
@@ -113,6 +120,49 @@ public final class TownData {
    }
    public long lastExchangeTick(UUID a, UUID b) {
       return this.lastExchangeTickByPair.getOrDefault(pairKey(a, b), Long.MIN_VALUE / 2);
+   }
+
+   // ───── Stage 22: per-pair affinity ─────
+
+   /** Lookup-or-create an {@link AffinityRecord} for the pair. Never
+    *  returns null — pairs default to a STRANGER record with zero
+    *  banters. Mutate-then-store: callers tweak via record methods
+    *  then re-put through {@link #putAffinity}. */
+   public AffinityRecord affinityFor(UUID a, UUID b) {
+      String key = AffinityRecord.key(a, b);
+      var existing = affinities.get(key);
+      if (existing != null) return existing;
+      return new AffinityRecord(a, b, 0, 0, Long.MIN_VALUE / 2);
+   }
+
+   /** Persist a record (typically after a banter delta). */
+   public void putAffinity(AffinityRecord rec) {
+      affinities.put(AffinityRecord.key(rec.a(), rec.b()), rec);
+   }
+
+   /** Read-only view of all pairs this villager participates in.
+    *  Useful for the Relationships tab and for nearby-villager LLM
+    *  context injection. */
+   public java.util.List<AffinityRecord> affinitiesFor(UUID villager) {
+      java.util.List<AffinityRecord> out = new java.util.ArrayList<>();
+      for (var rec : affinities.values()) {
+         if (rec.involves(villager)) out.add(rec);
+      }
+      return out;
+   }
+
+   /** Convenience: the tier between two villagers (STRANGER if no
+    *  record). Used by BirthService for the FRIEND-tier breeding gate. */
+   public AffinityRecord.Tier tierBetween(UUID a, UUID b) {
+      String key = AffinityRecord.key(a, b);
+      var existing = affinities.get(key);
+      return existing == null ? AffinityRecord.Tier.STRANGER : existing.tier();
+   }
+
+   /** Iterator over every pair record — for nightly compaction +
+    *  Relationships tab rendering. */
+   public java.util.Collection<AffinityRecord> allAffinities() {
+      return java.util.List.copyOf(affinities.values());
    }
 
    public String townName() { return this.townName; }
@@ -424,6 +474,13 @@ public final class TownData {
       }
       exch.put("lastTick", lastPair);
       tag.put("exchanges", exch);
+
+      // Stage 22a: per-pair affinity persistence.
+      ListTag affList = new ListTag();
+      for (var rec : this.affinities.values()) {
+         affList.add(rec.save());
+      }
+      tag.put("affinities", affList);
       return tag;
    }
 
@@ -542,6 +599,17 @@ public final class TownData {
                CompoundTag c = list.getCompound(i);
                this.lastExchangeTickByPair.put(c.getString("k"), c.getLong("t"));
             }
+         }
+      }
+
+      // Stage 22a: load per-pair affinities. Missing on saves before
+      // 22a — empty map default, no migration needed.
+      this.affinities.clear();
+      if (tag.contains("affinities")) {
+         ListTag list = tag.getList("affinities", Tag.TAG_COMPOUND);
+         for (int i = 0; i < list.size(); i++) {
+            AffinityRecord rec = AffinityRecord.load(list.getCompound(i));
+            this.affinities.put(AffinityRecord.key(rec.a(), rec.b()), rec);
          }
       }
    }

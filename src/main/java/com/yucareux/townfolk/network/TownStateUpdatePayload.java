@@ -179,8 +179,15 @@ public record TownStateUpdatePayload(
       // gender ∈ {"male","female"}; ageDays starts at 200 (adult) for
       // pre-18a saves, ticks +1 per game day at dawn via ScheduleService.
       String gender,
-      int ageDays
+      int ageDays,
+      // ── Stage 22a: per-pair affinity (one row per known villager) ──
+      List<RelationSummary> relationships
    ) {}
+
+   /** One row of the per-villager relationships tab. {@code tier} is
+    *  the wire-key name (STRANGER/ACQUAINTANCE/FRIEND/CLOSE/RIVAL). */
+   public record RelationSummary(UUID otherUuid, String otherName, String tier,
+                                  int banterCount, long lastBanterDay) {}
 
    private static final int MAX_LOG_MESSAGE_CHARS = 4096;
 
@@ -219,6 +226,20 @@ public record TownStateUpdatePayload(
             buf.writeVarLong(t.createdDay());
          },
          buf -> new TodoSummary(buf.readUtf(), buf.readUtf(1024), buf.readUtf(), buf.readUtf(), buf.readVarLong())
+      );
+
+   /** Stage 22a — per-villager relationship summary entry. */
+   private static final StreamCodec<RegistryFriendlyByteBuf, RelationSummary> RELATION_CODEC =
+      StreamCodec.of(
+         (buf, r) -> {
+            buf.writeUUID(r.otherUuid());
+            buf.writeUtf(r.otherName());
+            buf.writeUtf(r.tier());
+            buf.writeVarInt(r.banterCount());
+            buf.writeVarLong(r.lastBanterDay());
+         },
+         buf -> new RelationSummary(buf.readUUID(), buf.readUtf(), buf.readUtf(),
+            buf.readVarInt(), buf.readVarLong())
       );
 
    private static final StreamCodec<RegistryFriendlyByteBuf, ItemCount> ITEM_CODEC =
@@ -348,6 +369,8 @@ public record TownStateUpdatePayload(
             buf.writeVarInt(s.hunger());
             buf.writeUtf(s.gender());
             buf.writeVarInt(s.ageDays());
+            buf.writeVarInt(s.relationships().size());
+            for (RelationSummary r : s.relationships()) RELATION_CODEC.encode(buf, r);
          },
          buf -> {
             UUID id = buf.readUUID();
@@ -382,9 +405,12 @@ public record TownStateUpdatePayload(
             int hunger = buf.readVarInt();
             String gender = buf.readUtf();
             int ageDays = buf.readVarInt();
+            int relN = buf.readVarInt();
+            java.util.ArrayList<RelationSummary> rels = new java.util.ArrayList<>(relN);
+            for (int i = 0; i < relN; i++) rels.add(RELATION_CODEC.decode(buf));
             return new VillagerSummary(id, name, role, seed, backstory, alive,
                calls, inT, outT, cost, beliefs, pins, recentCount, lastCompact, todos,
-               packedPos, hp, maxHp, act, ph, pj, inv, profession, hunger, gender, ageDays);
+               packedPos, hp, maxHp, act, ph, pj, inv, profession, hunger, gender, ageDays, rels);
          }
       );
 

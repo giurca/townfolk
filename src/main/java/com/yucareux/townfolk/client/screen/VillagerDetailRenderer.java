@@ -424,15 +424,69 @@ final class VillagerDetailRenderer {
                                                 TownStateUpdatePayload.VillagerSummary v,
                                                 int innerL, int innerR, int top, int bottom) {
       Font font = screen.font();
-      g.drawString(font, "Relationships (derived from tavern conversations + dialogue)",
+      g.drawString(font, "Relationships (built from tavern banter)",
          innerL, top, UiTheme.MUTED, true);
-      int y = top + 14;
-      g.drawString(font, "Relationship counters arrive in a future stage.",
-         innerL, y, UiTheme.FAINT, true);
-      y += 12;
-      g.drawString(font, "Today the data exists (chat:<uuid> memories per banter)", innerL, y, UiTheme.FAINT, true);
-      y += 11;
-      g.drawString(font, "but isn't aggregated yet — see Stage 11e for the writers.", innerL, y, UiTheme.FAINT, true);
+
+      var rels = v.relationships();
+      if (rels == null || rels.isEmpty()) {
+         g.drawString(font, "(no relationships yet — visit a tavern to start mingling)",
+            innerL, top + 16, UiTheme.FAINT, true);
+         return;
+      }
+
+      int y = top + 16;
+      int rowH = 22;
+      long today = screen.minecraft().level == null ? 0L
+         : screen.minecraft().level.getGameTime() / 24000L;
+      for (var rel : rels) {
+         if (y + rowH > bottom) break;
+         g.fill(innerL, y, innerR - 4, y + rowH - 2, UiTheme.ROW_BG);
+         // Tier chip (left): coloured pill + label.
+         String tierLabel = tierDisplayLabel(rel.tier());
+         int chipW = font.width(tierLabel) + 10;
+         int chipColor = tierColor(rel.tier());
+         g.fill(innerL + 4, y + 4, innerL + 4 + chipW, y + rowH - 6, chipColor & 0x80FFFFFF);
+         g.drawString(font, tierLabel, innerL + 8, y + 6, chipColor, true);
+         // Name + banter count.
+         int nameX = innerL + chipW + 14;
+         g.drawString(font, rel.otherName(), nameX, y + 3, UiTheme.BODY, true);
+         g.drawString(font, rel.banterCount() + " banter"
+                                + (rel.banterCount() == 1 ? "" : "s"),
+            nameX, y + 13, UiTheme.FAINT, true);
+         // Right-side: last-day pill.
+         long daysAgo = today - rel.lastBanterDay();
+         String when = daysAgo < 0 ? "today"
+                     : daysAgo == 0 ? "today"
+                     : daysAgo == 1 ? "1 day ago"
+                     : daysAgo + " days ago";
+         int whenW = font.width(when);
+         g.drawString(font, when, innerR - whenW - 8, y + 8, UiTheme.MUTED, true);
+         y += rowH;
+      }
+   }
+
+   /** Tier-name (wire string) → display label. */
+   private static String tierDisplayLabel(String tier) {
+      return switch (tier) {
+         case "CLOSE"        -> "close";
+         case "FRIEND"       -> "friend";
+         case "ACQUAINTANCE" -> "acquaintance";
+         case "RIVAL"        -> "rival";
+         default              -> "stranger";
+      };
+   }
+
+   /** Tier-name (wire string) → colour hint. Matches AffinityRecord.Tier.color
+    *  on the server side — duplicated here because the wire format
+    *  ships the tier name not the enum. */
+   private static int tierColor(String tier) {
+      return switch (tier) {
+         case "CLOSE"        -> 0xFFFFD27A;     // gold
+         case "FRIEND"       -> 0xFF7AB46A;     // green
+         case "ACQUAINTANCE" -> 0xFFB89B70;     // muted
+         case "RIVAL"        -> 0xFFC76A50;     // red
+         default              -> 0xFF7A6849;     // faint
+      };
    }
 
    private static void renderActionsBody(TownAdminScreen screen, GuiGraphics g,

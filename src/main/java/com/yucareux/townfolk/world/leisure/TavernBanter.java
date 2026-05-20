@@ -258,6 +258,15 @@ public final class TavernBanter {
          "a=" + aEntry.name() + " b=" + bEntry.name()
             + " inTok=" + result.inputTokens() + " outTok=" + result.outputTokens(),
          "aLine=" + aLine + " | bLine=" + bLine);
+
+      // Stage 22b: fold this banter into the per-pair affinity ledger.
+      // Tone defaults to NEUTRAL (+1 score) until the LLM schema is
+      // extended to emit a_tone/b_tone in 22b's follow-on. Even with
+      // neutral-only deltas, the banter COUNT alone drives tier
+      // progression (STRANGER → ACQUAINTANCE → FRIEND → CLOSE).
+      com.yucareux.townfolk.world.RelationshipService.onBanter(
+         level, a.getUUID(), b.getUUID(),
+         com.yucareux.townfolk.town.AffinityRecord.Tone.NEUTRAL);
    }
 
    /** Send the styled chat line to every player within hearing range

@@ -132,6 +132,16 @@ public final class BirthService {
             Candidate b = list.get(j);
             if (a.comp.gender() == b.comp.gender()) continue;
             if (a.homePos.distSqr(b.homePos) > PAIR_BOND_RADIUS * PAIR_BOND_RADIUS) continue;
+            // Stage 22c: breeding requires emotional pairing not just
+            // colocation. The pair must have reached the FRIEND tier
+            // through tavern banter accumulation (see RelationshipService).
+            // STRANGER and ACQUAINTANCE pairs are politely declined.
+            // RIVAL pairs (negative score) also fail this check.
+            var tier = town.getTown().tierBetween(a.entry.uuid(), b.entry.uuid());
+            if (tier != com.yucareux.townfolk.town.AffinityRecord.Tier.FRIEND
+                && tier != com.yucareux.townfolk.town.AffinityRecord.Tier.CLOSE) {
+               continue;
+            }
             String key = PairRecord.key(a.entry.uuid(), b.entry.uuid());
             seenToday.add(key);
             PairRecord prev = PAIRS.get(key);

@@ -590,7 +590,8 @@ public final class TownAdminService {
             profession,
             component.hunger(),
             component.gender().wireKey(),
-            component.ageDays()
+            component.ageDays(),
+            relationsFor(town.getTown(), entry.uuid())
          ));
          // Tally for overview counters. "sleeping" is authoritative;
          // anything else with an activity != "idle" is working; the
@@ -840,6 +841,46 @@ public final class TownAdminService {
       PacketDistributor.sendToPlayer(player,
          new com.yucareux.townfolk.network.OpenVillagerDetailPayload(
             town.getBlockPos().asLong(), villagerUuid));
+   }
+
+   /** Stage 22d: build the per-villager relationship rows from TownData's
+    *  affinity store. Skipped tiers: STRANGER (no point cluttering the
+    *  tab with every uninteracted villager — Relationships starts at
+    *  ACQUAINTANCE). */
+   private static java.util.List<TownStateUpdatePayload.RelationSummary> relationsFor(
+         com.yucareux.townfolk.town.TownData data, java.util.UUID self) {
+      java.util.List<TownStateUpdatePayload.RelationSummary> out = new java.util.ArrayList<>();
+      for (var rec : data.affinitiesFor(self)) {
+         var tier = rec.tier();
+         if (tier == com.yucareux.townfolk.town.AffinityRecord.Tier.STRANGER) continue;
+         var other = rec.other(self);
+         String otherName = "?";
+         for (var e : data.villagers()) {
+            if (e.uuid().equals(other)) { otherName = e.name(); break; }
+         }
+         out.add(new TownStateUpdatePayload.RelationSummary(
+            other, otherName, tier.name(),
+            rec.banterCount(), rec.lastBanterDay()));
+      }
+      // Sort by tier descending (CLOSE first, RIVAL last), then by
+      // last-banter recency within ties.
+      out.sort((x, y) -> {
+         int t = -Integer.compare(tierOrdinal(x.tier()), tierOrdinal(y.tier()));
+         if (t != 0) return t;
+         return -Long.compare(x.lastBanterDay(), y.lastBanterDay());
+      });
+      return out;
+   }
+
+   private static int tierOrdinal(String tier) {
+      // Higher number = more prominent in the list.
+      return switch (tier) {
+         case "CLOSE" -> 4;
+         case "FRIEND" -> 3;
+         case "ACQUAINTANCE" -> 2;
+         case "RIVAL" -> 1;       // surfaced but at the bottom
+         default -> 0;
+      };
    }
 
    private TownAdminService() {
