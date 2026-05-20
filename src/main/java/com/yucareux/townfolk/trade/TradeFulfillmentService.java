@@ -168,16 +168,26 @@ public final class TradeFulfillmentService {
          if (!coverage.contains(pos)) continue;
          var be = level.getBlockEntity(pos);
          if (!(be instanceof net.minecraft.world.Container c)) continue;
+         int barrelTook = 0;
          for (int i = 0; i < c.getContainerSize() && took < need; i++) {
             ItemStack s = c.getItem(i);
             if (s.getItem() != want || s.isEmpty()) continue;
             int slotTake = Math.min(s.getCount(), need - took);
             s.shrink(slotTake);
             took += slotTake;
+            barrelTook += slotTake;
          }
          // Tell the BE its inventory changed so it persists + neighbours
          // re-render (hoppers, comparators, etc.).
          be.setChanged();
+         // Stage 21 audit fix: trade fulfillment bypasses StorageVerb's
+         // touch() so the tag reverse-index needs an explicit bump on
+         // any barrel we actually drained. Without this, MealService
+         // would direct hungry villagers to a now-empty barrel until
+         // the next deposit/withdraw/peek elsewhere bumped the gen.
+         if (barrelTook > 0) {
+            com.yucareux.townfolk.town.StorageRegistry.bumpMutationGen(level);
+         }
       }
       return took;
    }
