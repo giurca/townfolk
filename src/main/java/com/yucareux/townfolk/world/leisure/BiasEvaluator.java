@@ -123,9 +123,21 @@ public final class BiasEvaluator {
          @SuppressWarnings("unused") Biome bb = biome.value();   // touch — future biome-specific hints
       } catch (Throwable ignored) {}
 
-      // Clamp negative scores at 0.05 so a heavily-biased-against option
-      // still has a tiny chance — preserves agency.
-      scores.replaceAll((k, vScore) -> Math.max(0.05, vScore));
+      // Two-stage floor:
+      //   1. Structurally unavailable options (e.g. TAVERN with no
+      //      recognised tavern in town) get HARD-ZEROED so the sampler
+      //      never picks them. Promoting an unavailable option to 0.05
+      //      would let the sampler land on something that has no
+      //      executor and the villager would fall back to STAY_HOME
+      //      with a misleading "no longer recognised" reason.
+      //   2. Available-but-heavily-biased-against options get a 0.05
+      //      positive floor so they're still tiny-chance-pickable —
+      //      preserves agency / pattern-breaking.
+      if (!tavernAvailable) scores.put(LeisureActivity.TAVERN, 0.0);
+      scores.replaceAll((k, vScore) -> {
+         if (k == LeisureActivity.TAVERN && !tavernAvailable) return 0.0;
+         return Math.max(0.05, vScore);
+      });
 
       return new Biases(scores, narration);
    }

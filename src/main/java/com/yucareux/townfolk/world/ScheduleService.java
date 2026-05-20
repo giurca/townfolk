@@ -176,14 +176,17 @@ public final class ScheduleService {
          com.yucareux.townfolk.world.leisure.LeisureService.clearChoice(v.getUUID());
       }
 
-      // Yield to LeisureService during the evening band when a plan
-      // is in flight. The leisure layer owns the villager's movement
-      // (walking to the tavern, ambling around, etc.); we'd otherwise
-      // fight it on every tick by re-firing going_home. Dusk and
-      // later phases reclaim control so the villager makes bed in
-      // time. setActivity is harmless to skip — the leisure executors
+      // Yield to LeisureService whenever a plan is in flight AND the
+      // phase isn't yet dusk. Two windows matter:
+      //   - work_hours 8500-9000: the 500-tick pre-roll where leisure
+      //     dispatches movement to hide LLM latency. Without the yield
+      //     here, the schedule's going_to_work fights leisure's nav
+      //     and the villager appears stuck for the full pre-window.
+      //   - evening 9000-12000: the main leisure window.
+      // Dusk + night reclaim control so the villager makes bed in
+      // time. setActivity is harmless to skip — leisure executors
       // don't read it, and the activity label resumes once dusk hits.
-      if ("evening".equals(phase)
+      if (("work_hours".equals(phase) || "evening".equals(phase))
           && com.yucareux.townfolk.world.leisure.LeisureService.hasActivePlan(v.getUUID())) {
          var choice = com.yucareux.townfolk.world.leisure.LeisureService.currentChoice(v.getUUID());
          if (choice != null
