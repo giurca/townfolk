@@ -96,18 +96,29 @@ public final class AffinityRecord {
       this.lastBanterDay = day;
    }
 
-   /** Discrete tier from score + count. Designed with inertia: needs
-    *  multiple banters to climb past ACQUAINTANCE, and a negative
-    *  score AT ANY count flips to RIVAL. */
+   /** Discrete tier from score + count. Designed with inertia:
+    *  - count thresholds gate ACQUAINTANCE/FRIEND/CLOSE
+    *  - RIVAL requires a {@link #RIVAL_DEADBAND}-strong negative score
+    *    (audit P1 fix — Stage 22): without this, a pair sitting at
+    *    score=0 with mixed COLD/WARM tone-tagged banter would
+    *    ping-pong RIVAL↔FRIEND each exchange, spamming TownLog
+    *    transitions + per-villager memory entries.
+    *
+    *  <p>{@link Tone#NEUTRAL} (the only tone fired today) is +1, so
+    *  the current state evolution is monotonic — the deadband only
+    *  matters once 22b's tone-tagged banter schema lands. Worth
+    *  shipping the fix preemptively so it doesn't bite later. */
+   public static final int RIVAL_DEADBAND = -2;
+
    public Tier tier() {
       return tierFor(score, banterCount);
    }
 
    public static Tier tierFor(int score, int banterCount) {
-      if (banterCount == 0) return Tier.STRANGER;
-      if (score < 0)        return Tier.RIVAL;
-      if (banterCount <= 2) return Tier.ACQUAINTANCE;
-      if (banterCount <= 8) return Tier.FRIEND;
+      if (banterCount == 0)            return Tier.STRANGER;
+      if (score <= RIVAL_DEADBAND)     return Tier.RIVAL;
+      if (banterCount <= 2)            return Tier.ACQUAINTANCE;
+      if (banterCount <= 8)            return Tier.FRIEND;
       return Tier.CLOSE;
    }
 
