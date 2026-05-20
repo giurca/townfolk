@@ -170,6 +170,37 @@ public final class ScheduleService {
             "villager=" + name + " phase=" + phase, "");
       }
 
+      // Day rollover: clear any stale leisure plan so the next evening
+      // rolls fresh. Dawn is the natural reset point.
+      if ("dawn".equals(phase)) {
+         com.yucareux.townfolk.world.leisure.LeisureService.clearChoice(v.getUUID());
+      }
+
+      // Yield to LeisureService during the evening band when a plan
+      // is in flight. The leisure layer owns the villager's movement
+      // (walking to the tavern, ambling around, etc.); we'd otherwise
+      // fight it on every tick by re-firing going_home. Dusk and
+      // later phases reclaim control so the villager makes bed in
+      // time. setActivity is harmless to skip — the leisure executors
+      // don't read it, and the activity label resumes once dusk hits.
+      if ("evening".equals(phase)
+          && com.yucareux.townfolk.world.leisure.LeisureService.hasActivePlan(v.getUUID())) {
+         var choice = com.yucareux.townfolk.world.leisure.LeisureService.currentChoice(v.getUUID());
+         if (choice != null
+             && choice.activity() != com.yucareux.townfolk.world.leisure.LeisureActivity.STAY_HOME) {
+            // Reflect the leisure activity in the status string so the
+            // admin UI and pulse strip read it ("at_tavern", "wandering").
+            String label = switch (choice.activity()) {
+               case TAVERN -> "at_tavern";
+               case WALK   -> "wandering";
+               default      -> "idle";
+            };
+            setActivity(v, label);
+            return;
+         }
+         // STAY_HOME falls through to the existing going_home / at_home path.
+      }
+
       switch (desired) {
          case "going_to_work" -> {
             GlobalPos job = comp.playerSetJob()
