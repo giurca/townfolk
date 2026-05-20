@@ -117,7 +117,8 @@ public final class TownAdminScreen extends Screen {
    // ── New for redesigned tabs ──
    /** Row-level scroll offset for the Resources grid. Driven by the
     *  mouse wheel; clamped at render time once the row count is known. */
-   private int resourcesGridScrollRows = 0;
+   /** Pkg-private — {@link ResourcesRenderer} reads + clamps. */
+   int resourcesGridScrollRows = 0;
    private UiList<TownStateUpdatePayload.ResourceLoc> resourcesDrillList;
    /** Scroll offset (rows) for the Parcels grid. Pkg-private — mutated
     *  by both {@link ParcelsRenderer} (clamping) and the click/scroll
@@ -128,7 +129,7 @@ public final class TownAdminScreen extends Screen {
    String selectedParcelId = null;
    /** When set, the Resources tab renders a floating popup listing every
     *  barrel that holds this item. */
-   private String selectedResourceItem;
+   String selectedResourceItem;
 
    /** Resource-grid cell wrapper. Combines a wire-format ItemCount with
     *  a flag indicating whether the row is a town-treasury entry
@@ -136,17 +137,17 @@ public final class TownAdminScreen extends Screen {
     *  grid render both, with distinct styling per cell type and a
     *  branched click handler (treasury → withdraw, stockpile →
     *  production-cap popup). */
-   private record ResCell(TownStateUpdatePayload.ItemCount ic, boolean treasury) {}
+   // ResCell record + Resources tab render live in {@link ResourcesRenderer} (15b.4.g).
    /** Search filter on the Resources grid — matches against item id /
     *  pretty name. */
-   private EditBox resourceSearchBox;
+   EditBox resourceSearchBox;
    /** Sort key for the Resources grid: "count" (desc) / "name" (a-z) /
     *  "recent" (max container lastUpdatedTick across holders). */
-   private String resourceSort = "count";
+   String resourceSort = "count";
    /** Cached "recent activity" tick per item id, recomputed once per
     *  render. Lets the "recent" sort sit in O(n) without a second walk
     *  over containers per comparison. */
-   private final java.util.Map<String, Long> resourceRecentByItem = new java.util.HashMap<>();
+   final java.util.Map<String, Long> resourceRecentByItem = new java.util.HashMap<>();
 
    /** EditBoxes for the production-cap min/max values, shown inside the
     *  resource popup when an item is selected. Lifecycle: created in
@@ -489,12 +490,12 @@ public final class TownAdminScreen extends Screen {
       int paneL_eff = paneL;
       int renderTop = panelTop() + 22 + 16;
       int renderBottom = panelBottom() - PADDING;
-      int[] bounds = resourcePopupBounds(paneL_eff, paneR_eff, renderTop, renderBottom);
+      int[] bounds = ResourcesRenderer.resourcePopupBounds(this, paneL_eff, paneR_eff, renderTop, renderBottom);
       int popX = bounds[0], popY = bounds[1], popW = bounds[2];
 
       // Target row inside the popup: 28px tall, starts at popY+32.
       int rowY = popY + 32;
-      var target = findTargetFor(this.selectedResourceItem);
+      var target = ResourcesRenderer.findTargetFor(this, this.selectedResourceItem);
 
       // Layout the row: "min: [_____]   max: [_____]   [Enable|Disable]"
       int innerL = popX + 12;
@@ -921,7 +922,7 @@ public final class TownAdminScreen extends Screen {
             // via initResourcePopupWidgets) propagate to super so vanilla
             // widget hit-testing handles them.
             if (this.selectedResourceItem != null) {
-               int[] bounds = resourcePopupBounds(paneL, paneR, contentTop, contentBottom);
+               int[] bounds = ResourcesRenderer.resourcePopupBounds(this, paneL, paneR, contentTop, contentBottom);
                int popX = bounds[0], popY = bounds[1], popW = bounds[2], popH = bounds[3];
                boolean inside = mouseX >= popX && mouseX < popX + popW
                              && mouseY >= popY && mouseY < popY + popH;
@@ -936,7 +937,7 @@ public final class TownAdminScreen extends Screen {
             }
 
             // Sort chips first.
-            String sortHit = hitTestResourceSortChips(mouseX, mouseY, paneL, contentTop);
+            String sortHit = ResourcesRenderer.hitTestSortChips(this, mouseX, mouseY, paneL, contentTop);
             if (sortHit != null) {
                this.resourceSort = sortHit;
                return true;
@@ -946,7 +947,7 @@ public final class TownAdminScreen extends Screen {
             //  - Stockpile → open the production-cap popup (existing flow).
             //  - Treasury  → withdraw immediately. Plain click takes
             //    everything; shift-click takes 1.
-            ResCell cellHit = hitTestResourceCell(mouseX, mouseY, paneL, paneR, contentTop, contentBottom);
+            ResourcesRenderer.ResCell cellHit = ResourcesRenderer.hitTestCell(this, mouseX, mouseY, paneL, paneR, contentTop, contentBottom);
             if (cellHit != null) {
                if (cellHit.treasury()) {
                   boolean shift = net.minecraft.client.gui.screens.Screen.hasShiftDown();
@@ -1156,7 +1157,7 @@ public final class TownAdminScreen extends Screen {
             int bottom = panelBottom() - PADDING;
             int innerL = paneL + UiTheme.PADDING;
             int innerR = paneR - UiTheme.PADDING;
-            int gridTop = top + RES_GRID_TOP;
+            int gridTop = top + ResourcesRenderer.RES_GRID_TOP;
             int gridBot = bottom - 6;
             if (mouseX >= innerL && mouseX <= innerR
                 && mouseY >= gridTop && mouseY <= gridBot) {
@@ -1306,7 +1307,7 @@ public final class TownAdminScreen extends Screen {
             switch (this.tab) {
                case OVERVIEW -> OverviewRenderer.render(this, graphics, l, r, contentTop, contentBottom);
                case VILLAGERS -> VillagersRenderer.render(this, graphics, l, r, contentTop, contentBottom, lmX, lmY);
-               case RESOURCES -> renderResourcesTab(graphics, l, r, contentTop, contentBottom, lmX, lmY);
+               case RESOURCES -> ResourcesRenderer.render(this, graphics, l, r, contentTop, contentBottom, lmX, lmY);
                case PARCELS -> ParcelsRenderer.render(this, graphics, l, r, contentTop, contentBottom, lmX, lmY);
                case TRADE -> TradeRenderer.render(this, graphics, l, r, contentTop, contentBottom);
                case TASKS -> TasksRenderer.render(this, graphics, l, r, contentTop, contentBottom, mouseX, mouseY);
@@ -1391,21 +1392,7 @@ public final class TownAdminScreen extends Screen {
       int colon = id.indexOf(':');
       return (colon < 0 ? id : id.substring(colon + 1)).replace('_', ' ');
    }
-
-   // ───────── Resources tab (icon grid + popup drill-down) ─────────
-
-   /** Cell metrics for the icon grid.
-    *
-    *  Layout: a 10px top strip for the status dot + production-cap
-    *  badge (so they never collide with the icon), then the 16px item
-    *  icon centered, then the count line, then the truncated name.
-    *  Width is bumped to 66 to comfortably fit a badge like "16/64". */
-   private static final int RES_CELL_W = 66;
-   private static final int RES_CELL_H = 58;
-   private static final int RES_CELL_GAP = 8;
-   /** Vertical Y offset (from tab top) at which the grid begins —
-    *  leaves room for the search/sort row. */
-   private static final int RES_GRID_TOP = 26;
+   // Resources tab render + popup + grid hit-test live in {@link ResourcesRenderer} (15b.4.g).
 
    /** Cache for {@link ItemStack}s built from item-ids; populated
     *  lazily, reused across frames. Saves one
@@ -1419,481 +1406,6 @@ public final class TownAdminScreen extends Screen {
             net.minecraft.resources.ResourceLocation.parse(k));
          return new net.minecraft.world.item.ItemStack(item);
       });
-   }
-
-   /** Grid view of every resource the town stockpiles. Each cell is an
-    *  icon + count. Search filters by name; sort chips reorder. Click a
-    *  cell to open the popup showing which barrels hold the item. */
-   private void renderResourcesTab(GuiGraphics graphics, int paneL, int paneR,
-                                   int top, int bottom, int mouseX, int mouseY) {
-      int innerL = paneL + UiTheme.PADDING;
-      int innerR = paneR - UiTheme.PADDING;
-      int contentTop = top + 10;
-
-      // Header / total (right side — search box lives on the left and
-      // was placed by initResourcesTabWidgets at innerL, top+4).
-      int totalDistinct = this.state.aggregateResources().size();
-      int totalItems = 0;
-      for (var ic : this.state.aggregateResources()) totalItems += ic.count();
-      String totalLabel = totalDistinct + " kinds · " + totalItems + " items";
-      UiText.rightFaint(graphics, this.font, totalLabel, innerR, contentTop);
-
-      // Sort chips to the right of the search box.
-      int chipsX = innerL + 206;
-      VillagersRenderer.drawChipRow(this, graphics, chipsX, top + 4, "Sort:",
-         new String[]{"count", "name", "recent"}, this.resourceSort);
-
-      // Refresh recency cache for the "recent" sort.
-      this.resourceRecentByItem.clear();
-      for (var rl : this.state.resourceLocations()) {
-         long tick = 0L;
-         for (var se : this.state.storage()) {
-            if (se.packedPos() == rl.packedPos()) { tick = se.lastUpdatedTick(); break; }
-         }
-         this.resourceRecentByItem.merge(rl.itemId(), tick, Math::max);
-      }
-
-      // Apply search + sort to produce the rendered grid list.
-      // Treasury items (claimable payouts) are interleaved with normal
-      // stockpile items — same grid, styled differently per cell.
-      String q = this.resourceSearchBox == null ? "" :
-         this.resourceSearchBox.getValue().trim().toLowerCase(Locale.ROOT);
-      List<ResCell> items = new java.util.ArrayList<>();
-      for (var ic : this.state.aggregateResources()) {
-         if (q.isEmpty() || shortItemName(ic.itemId()).toLowerCase(Locale.ROOT).contains(q)
-             || ic.itemId().contains(q)) {
-            items.add(new ResCell(ic, false));
-         }
-      }
-      for (var ic : this.state.treasury()) {
-         if (q.isEmpty() || shortItemName(ic.itemId()).toLowerCase(Locale.ROOT).contains(q)
-             || ic.itemId().contains(q)) {
-            items.add(new ResCell(ic, true));
-         }
-      }
-      // Treasury (CLAIM) cells ALWAYS come first regardless of sort
-      // mode — they're claimable payouts and the player wants to see
-      // them before the regular stockpile. Within each partition the
-      // user-chosen sort key applies.
-      java.util.Comparator<ResCell> within = switch (this.resourceSort) {
-         case "name"   -> (a, b) -> shortItemName(a.ic().itemId()).compareToIgnoreCase(shortItemName(b.ic().itemId()));
-         case "recent" -> (a, b) -> Long.compare(
-            this.resourceRecentByItem.getOrDefault(b.ic().itemId(), 0L),
-            this.resourceRecentByItem.getOrDefault(a.ic().itemId(), 0L));
-         default        -> (a, b) -> Integer.compare(b.ic().count(), a.ic().count());
-      };
-      items.sort(java.util.Comparator.<ResCell, Boolean>comparing(c -> !c.treasury())
-         .thenComparing(within));
-
-      // Render grid.
-      int gridTop = top + RES_GRID_TOP;
-      int gridBot = bottom - 6;
-      int gridW   = innerR - innerL;
-      int cols    = Math.max(1, (gridW + RES_CELL_GAP) / (RES_CELL_W + RES_CELL_GAP));
-      // Centre the grid horizontally.
-      int gridUsed = cols * RES_CELL_W + (cols - 1) * RES_CELL_GAP;
-      int gridX0   = innerL + (gridW - gridUsed) / 2;
-
-      if (items.isEmpty()) {
-         UiText.faint(graphics, this.font,
-            q.isEmpty() ? "no resources stocked — register a barrel and have a villager deposit something"
-                         : "no items match \"" + q + "\"",
-            innerL, gridTop + 10);
-      } else {
-         // Scissor so cells past the bottom are clipped instead of
-         // bleeding into the panel border.
-         // Clamp scroll: never leave the grid blank by scrolling past the end.
-         int totalRows = (items.size() + cols - 1) / cols;
-         int visibleRows = Math.max(1, (gridBot - gridTop + RES_CELL_GAP) / (RES_CELL_H + RES_CELL_GAP));
-         int maxScrollRow = Math.max(0, totalRows - visibleRows);
-         if (this.resourcesGridScrollRows > maxScrollRow) this.resourcesGridScrollRows = maxScrollRow;
-         int scrollPx = this.resourcesGridScrollRows * (RES_CELL_H + RES_CELL_GAP);
-
-         // Scissor handles clean clipping at gridBot — keep the break loose
-         // (`cy > gridBot`) so partial rows still render and just get clipped
-         // visually instead of disappearing.
-         scaledScissor(graphics, innerL, gridTop, innerR, gridBot);
-         int i = 0;
-         for (var cell : items) {
-            int row = i / cols;
-            int col = i % cols;
-            int cx = gridX0 + col * (RES_CELL_W + RES_CELL_GAP);
-            int cy = gridTop + row * (RES_CELL_H + RES_CELL_GAP) - scrollPx;
-            if (cy > gridBot) break;
-            if (cy + RES_CELL_H < gridTop) { i++; continue; } // scrolled off top
-            renderResourceCell(graphics, cell, cx, cy, mouseX, mouseY);
-            i++;
-         }
-         graphics.disableScissor();
-      }
-
-      // Floating popup — drawn on top of the grid when an item is
-      // selected. Render LAST so it occludes the cells underneath.
-      if (this.selectedResourceItem != null) {
-         renderResourcePopup(graphics, paneL, paneR, top, bottom, mouseX, mouseY);
-      }
-   }
-
-   /** Gold-ish hue for treasury cell backgrounds — distinguishes
-    *  claimable payouts from regular stockpile at a glance. Aliased
-    *  to UiTheme so the trade-popup chip palette + treasury cells
-    *  stay in lockstep. */
-   private static final int TREASURY_CELL_BG     = UiTheme.TREASURY_CELL_BG;
-   private static final int TREASURY_CELL_BORDER = UiTheme.TREASURY_CELL_BORDER;
-
-   /** One cell of the resource grid. Renders BOTH normal stockpile
-    *  entries and town-treasury entries (claimable payouts) — the
-    *  {@link ResCell#treasury} flag switches the styling and tag.
-    *
-    *  <p>Vertical layout (y offsets):
-    *  <ul>
-    *    <li>+2  badge strip — "min/max" cap tag (stockpile) OR
-    *            "CLAIM" tag (treasury)
-    *    <li>+12 item icon (16×16, centred)
-    *    <li>+30 count line — ↑/↓ trend + count + "+N" in-flight (stockpile only)
-    *    <li>+42 name line (truncated, centred)
-    *  </ul> */
-   private void renderResourceCell(GuiGraphics g, ResCell cell,
-                                   int x, int y, int mouseX, int mouseY) {
-      var ic = cell.ic();
-      boolean treasury = cell.treasury();
-      boolean hovered = mouseX >= x && mouseX < x + RES_CELL_W
-                     && mouseY >= y && mouseY < y + RES_CELL_H;
-      // Treasury entries aren't selectable for the production-cap
-      // popup — they only respond to click-to-withdraw — so selection
-      // highlight is stockpile-only.
-      boolean selected = !treasury && ic.itemId().equals(this.selectedResourceItem);
-
-      int bg = treasury ? TREASURY_CELL_BG
-            : (hovered || selected ? TAB_ACTIVE_BG : ROW_BG);
-      g.fill(x, y, x + RES_CELL_W, y + RES_CELL_H, bg);
-
-      if (treasury) {
-         // Full gold border on all four sides — strong visual cue that
-         // these are different from stockpile cells.
-         g.fill(x, y, x + RES_CELL_W, y + 1, TREASURY_CELL_BORDER);
-         g.fill(x, y + RES_CELL_H, x + RES_CELL_W, y + RES_CELL_H + 1, TREASURY_CELL_BORDER);
-         g.fill(x, y, x + 1, y + RES_CELL_H, TREASURY_CELL_BORDER);
-         g.fill(x + RES_CELL_W - 1, y, x + RES_CELL_W, y + RES_CELL_H, TREASURY_CELL_BORDER);
-      } else {
-         g.fill(x, y + RES_CELL_H, x + RES_CELL_W, y + RES_CELL_H + 1,
-            selected ? FG_ACCENT : PANEL_BORDER);
-      }
-
-      // Badge strip (top).
-      if (treasury) {
-         // "CLAIM" tag on the right; small gold pip on the left to
-         // mirror the production-cap status dot's location.
-         String tag = "CLAIM";
-         int tagW = this.font.width(tag);
-         g.drawString(this.font, tag,
-            x + RES_CELL_W - tagW - 4, y + 2,
-            TREASURY_CELL_BORDER, true);
-         g.fill(x + 3, y + 3, x + 6, y + 6, TREASURY_CELL_BORDER);
-      } else {
-         var target = findTargetFor(ic.itemId());
-         if (target != null) {
-            String tag = target.min() + "/" + target.max();
-            int tagW = this.font.width(tag);
-            int tagX = x + RES_CELL_W - tagW - 4;
-            int tagY = y + 2;
-            g.drawString(this.font, tag, tagX, tagY,
-               target.active() ? FG_DIM : FG_ERROR, true);
-            int dotColor = target.active() ? UiTheme.OK : UiTheme.BAD;
-            g.fill(x + 3, y + 3, x + 6, y + 6, dotColor);
-         }
-      }
-
-      // Item icon — fixed band y+12 .. y+28.
-      int iconX = x + (RES_CELL_W - 16) / 2;
-      int iconY = y + 12;
-      var stack = stackForItemId(ic.itemId());
-      g.renderItem(stack, iconX, iconY);
-
-      // Count line — y+32.
-      // For STOCKPILE cells: ↑/↓ trend arrow + count + "+N" in-flight.
-      // For TREASURY cells: just the count, in the treasury gold tint
-      //   (no trend / in-flight — treasury is a one-way pool).
-      if (treasury) {
-         String countText = String.valueOf(ic.count());
-         int cw = this.font.width(countText);
-         g.drawString(this.font, countText,
-            x + (RES_CELL_W - cw) / 2, y + 32,
-            TREASURY_CELL_BORDER, true);
-      } else {
-         int inFlight = inFlightFor(ic.itemId());
-         String arrow = ic.trend() > 0 ? "↑ " : ic.trend() < 0 ? "↓ " : "";
-         int arrowColor = ic.trend() > 0 ? UiTheme.OK
-                        : ic.trend() < 0 ? UiTheme.BAD
-                        : FG_FAINT;
-         String countText = String.valueOf(ic.count());
-         String suffix = inFlight > 0 ? "  +" + inFlight : "";
-         int arrowW = this.font.width(arrow);
-         int countW = this.font.width(countText);
-         int suffixW = this.font.width(suffix);
-         int totalW = arrowW + countW + suffixW;
-         int drawX = x + (RES_CELL_W - totalW) / 2;
-         if (!arrow.isEmpty()) {
-            g.drawString(this.font, arrow, drawX, y + 32, arrowColor, true);
-            drawX += arrowW;
-         }
-         g.drawString(this.font, countText, drawX, y + 32, FG_ACCENT, true);
-         drawX += countW;
-         if (!suffix.isEmpty()) {
-            g.drawString(this.font, suffix, drawX, y + 32, FG_FAINT, true);
-         }
-      }
-
-      // Name line — y+44, truncated to cell width.
-      String name = shortItemName(ic.itemId());
-      String shown = name;
-      if (this.font.width(shown) > RES_CELL_W - 6) {
-         shown = this.font.plainSubstrByWidth(shown, RES_CELL_W - 10) + "…";
-      }
-      int nw = this.font.width(shown);
-      g.drawString(this.font, shown, x + (RES_CELL_W - nw) / 2, y + 44,
-         treasury ? TREASURY_CELL_BORDER : FG_DIM, true);
-   }
-
-   /** Sum the count of {@code itemId} across every villager's
-    *  inventory in the current state snapshot. Used by the Resources
-    *  grid to surface "+N in flight" when the stockpile is about to
-    *  grow.
-    *
-    *  <p>Recomputed per cell per frame; cheap because villager count
-    *  and inventory size are both small. If profiling ever shows it
-    *  matters, cache once per state-update tick. */
-   private int inFlightFor(String itemId) {
-      int sum = 0;
-      for (var v : this.state.villagers()) {
-         for (var ic : v.inventory()) {
-            if (ic.itemId().equals(itemId)) sum += ic.count();
-         }
-      }
-      return sum;
-   }
-
-   /** Look up the production target for an item id (if any). Returns
-    *  null when no target exists in the current state snapshot. */
-   private TownStateUpdatePayload.ProductionTarget findTargetFor(String itemId) {
-      if (this.state.productionTargets() == null) return null;
-      for (var t : this.state.productionTargets()) {
-         if (t.itemId().equals(itemId)) return t;
-      }
-      return null;
-   }
-
-   // ───── Production target controls (inside the resource popup) ─────
-
-   /** Render the labels and status indicator for the target row inside
-    *  the resource popup. The EditBoxes + Enable / Disable / Apply
-    *  buttons are vanilla widgets — they're added in
-    *  {@link #initResourcePopupWidgets} and render themselves; this
-    *  method just paints the text decorations around them.
-    *
-    *  Layout coordinates MUST match initResourcePopupWidgets or the
-    *  labels won't line up with the inputs. */
-   private void renderTargetControls(GuiGraphics g, int popX, int rowY, int popW,
-                                     TownStateUpdatePayload.ProductionTarget target) {
-      int innerL = popX + 12;
-      g.drawString(this.font, "Cap", innerL, rowY + 5, FG_DIM, true);
-
-      int minLabelX = innerL + 42;
-      g.drawString(this.font, "min:", minLabelX, rowY + 5, FG_DIM, true);
-      // (the min EditBox renders itself at minLabelX+24)
-
-      int maxLabelX = minLabelX + 88;
-      g.drawString(this.font, "max:", maxLabelX, rowY + 5, FG_DIM, true);
-      // (the max EditBox renders itself at maxLabelX+24)
-
-      // Status indicator under the row.
-      String status = target == null
-         ? "(no cap — set min/max and Apply to enable)"
-         : (target.active() ? "● producing" : "● paused (at cap)");
-      int statusColor = target == null ? FG_FAINT
-                                       : (target.active() ? UiTheme.OK : UiTheme.BAD);
-      g.drawString(this.font, status, innerL, rowY + 19, statusColor, true);
-
-      // Bottom divider.
-      g.fill(popX + 8, rowY + 26, popX + popW - 8, rowY + 27, PANEL_BORDER);
-   }
-
-   /** Single source of truth for the resource-popup geometry, used by
-    *  both render and the outside-click hit-test. Returns
-    *  {@code [x, y, w, h]} in panel-relative coords.
-    *
-    *  The popup always reserves a 28px target-controls row when an
-    *  item is selected — so the player can enable a cap on any item,
-    *  not just ones already capped. */
-   private int[] resourcePopupBounds(int paneL, int paneR, int top, int bottom) {
-      int drillCount = 0;
-      if (this.selectedResourceItem != null) {
-         for (var rl : this.state.resourceLocations()) {
-            if (rl.itemId().equals(this.selectedResourceItem)) drillCount++;
-         }
-      }
-      int popW = 380;
-      int targetRowH = this.selectedResourceItem != null ? 28 : 0;
-      int popH = Math.min(360, 60 + targetRowH + Math.max(2, drillCount) * 22 + 16);
-      int popX = paneL + ((paneR - paneL) - popW) / 2;
-      int popY = top + ((bottom - top) - popH) / 2;
-      return new int[]{ popX, popY, popW, popH };
-   }
-
-   /** Floating popup overlay listing every barrel holding the selected
-    *  item. Drawn centred on the panel; click outside or press ESC to
-    *  dismiss (handled in the click + key handlers). */
-   private void renderResourcePopup(GuiGraphics g, int paneL, int paneR,
-                                    int top, int bottom, int mouseX, int mouseY) {
-      String item = this.selectedResourceItem;
-      List<TownStateUpdatePayload.ResourceLoc> drill = new java.util.ArrayList<>();
-      for (var rl : this.state.resourceLocations()) {
-         if (rl.itemId().equals(item)) drill.add(rl);
-      }
-      int[] bounds = resourcePopupBounds(paneL, paneR, top, bottom);
-      int popX = bounds[0], popY = bounds[1], popW = bounds[2], popH = bounds[3];
-
-      // Dim background.
-      g.fill(paneL, top, paneR, bottom, 0xC0000000);
-
-      // Frame.
-      g.fill(popX, popY, popX + popW, popY + popH, PANEL_BG);
-      g.fill(popX - 1, popY - 1, popX + popW + 1, popY, FG_ACCENT);
-      g.fill(popX - 1, popY + popH, popX + popW + 1, popY + popH + 1, FG_ACCENT);
-      g.fill(popX - 1, popY - 1, popX, popY + popH + 1, FG_ACCENT);
-      g.fill(popX + popW, popY - 1, popX + popW + 1, popY + popH + 1, FG_ACCENT);
-
-      // Header: item icon + name + total
-      int hx = popX + 10, hy = popY + 8;
-      var stack = stackForItemId(item);
-      g.renderItem(stack, hx, hy);
-      int total = 0;
-      for (var rl : drill) total += rl.count();
-      g.drawString(this.font, shortItemName(item) + " · " + total + " across "
-         + drill.size() + " " + (drill.size() == 1 ? "container" : "containers"),
-         hx + 22, hy + 4, FG_ACCENT, true);
-
-      String hint = "click outside or press ESC to close";
-      g.drawString(this.font, hint, popX + popW - this.font.width(hint) - 10,
-         popY + popH - 12, FG_FAINT, true);
-
-      // Production-cap controls row — always visible so the player can
-      // enable a cap on any item, not just ones that already have one.
-      int rowY = popY + 32;
-      var target = findTargetFor(item);
-      renderTargetControls(g, popX, rowY, popW, target);
-      rowY += 28;
-
-      // Container rows.
-      int rowH = 22;
-      scaledScissor(g, popX, rowY, popX + popW, popY + popH - 16);
-      if (drill.isEmpty()) {
-         g.drawString(this.font, "(this item has been emptied since the page was last refreshed)",
-            popX + 12, rowY + 4, FG_FAINT, true);
-      } else {
-         for (var rl : drill) {
-            if (rowY + rowH > popY + popH - 16) break;
-            // Find label / kind.
-            String label = null;
-            String kind = "barrel";
-            for (var se : this.state.storage()) {
-               if (se.packedPos() == rl.packedPos()) {
-                  label = se.label();
-                  kind  = se.blockKind();
-                  break;
-               }
-            }
-            net.minecraft.core.BlockPos cp = net.minecraft.core.BlockPos.of(rl.packedPos());
-            g.fill(popX + 8, rowY, popX + popW - 8, rowY + rowH - 2, ROW_BG);
-            String left = (label == null || label.isBlank())
-               ? (kind + " at " + cp.toShortString())
-               : ("\"" + label + "\"  · " + kind + " at " + cp.toShortString());
-            g.drawString(this.font, UiText.truncate(this.font, left, popW - 80),
-               popX + 14, rowY + 6, FG_PRIMARY, true);
-            String right = rl.count() + "×";
-            g.drawString(this.font, right,
-               popX + popW - 14 - this.font.width(right), rowY + 6, FG_ACCENT, true);
-            rowY += rowH;
-         }
-      }
-      g.disableScissor();
-   }
-
-   /** Hit-test for the resource grid. Returns the item id of the clicked
-    *  cell, or {@code null} if the click was outside the grid. Uses the
-    *  same geometry as {@link #renderResourcesTab}. */
-   private ResCell hitTestResourceCell(double mouseX, double mouseY, int paneL, int paneR,
-                                       int top, int bottom) {
-      int innerL = paneL + UiTheme.PADDING;
-      int innerR = paneR - UiTheme.PADDING;
-      int gridTop = top + RES_GRID_TOP;
-      int gridBot = bottom - 6;
-      int gridW   = innerR - innerL;
-      int cols    = Math.max(1, (gridW + RES_CELL_GAP) / (RES_CELL_W + RES_CELL_GAP));
-      int gridUsed = cols * RES_CELL_W + (cols - 1) * RES_CELL_GAP;
-      int gridX0   = innerL + (gridW - gridUsed) / 2;
-
-      // Mirror the search/sort + interleave logic from
-      // renderResourcesTab so click coordinates always match what the
-      // player sees.
-      String q = this.resourceSearchBox == null ? "" :
-         this.resourceSearchBox.getValue().trim().toLowerCase(Locale.ROOT);
-      List<ResCell> items = new java.util.ArrayList<>();
-      for (var ic : this.state.aggregateResources()) {
-         if (q.isEmpty() || shortItemName(ic.itemId()).toLowerCase(Locale.ROOT).contains(q)
-             || ic.itemId().contains(q)) items.add(new ResCell(ic, false));
-      }
-      for (var ic : this.state.treasury()) {
-         if (q.isEmpty() || shortItemName(ic.itemId()).toLowerCase(Locale.ROOT).contains(q)
-             || ic.itemId().contains(q)) items.add(new ResCell(ic, true));
-      }
-      // Treasury (CLAIM) cells ALWAYS come first regardless of sort
-      // mode — they're claimable payouts and the player wants to see
-      // them before the regular stockpile. Within each partition the
-      // user-chosen sort key applies.
-      java.util.Comparator<ResCell> within = switch (this.resourceSort) {
-         case "name"   -> (a, b) -> shortItemName(a.ic().itemId()).compareToIgnoreCase(shortItemName(b.ic().itemId()));
-         case "recent" -> (a, b) -> Long.compare(
-            this.resourceRecentByItem.getOrDefault(b.ic().itemId(), 0L),
-            this.resourceRecentByItem.getOrDefault(a.ic().itemId(), 0L));
-         default        -> (a, b) -> Integer.compare(b.ic().count(), a.ic().count());
-      };
-      items.sort(java.util.Comparator.<ResCell, Boolean>comparing(c -> !c.treasury())
-         .thenComparing(within));
-      int scrollPx = this.resourcesGridScrollRows * (RES_CELL_H + RES_CELL_GAP);
-      int i = 0;
-      for (var cell : items) {
-         int row = i / cols;
-         int col = i % cols;
-         int cx = gridX0 + col * (RES_CELL_W + RES_CELL_GAP);
-         int cy = gridTop + row * (RES_CELL_H + RES_CELL_GAP) - scrollPx;
-         if (cy > gridBot) break;
-         if (cy + RES_CELL_H < gridTop) { i++; continue; }
-         // Reject clicks below gridBot even if the cell technically starts
-         // above — the visible (un-clipped) area is the only hit-region.
-         if (mouseX >= cx && mouseX < cx + RES_CELL_W
-             && mouseY >= cy && mouseY < Math.min(cy + RES_CELL_H, gridBot)
-             && mouseY >= Math.max(cy, gridTop)) {
-            return cell;
-         }
-         i++;
-      }
-      return null;
-   }
-
-   /** Hit-test for the resource-sort chip row. Returns the new sort or
-    *  {@code null} for no hit. */
-   private String hitTestResourceSortChips(double mouseX, double mouseY, int paneL, int top) {
-      int x = paneL + UiTheme.PADDING + 206;
-      int y = top + 4;
-      int cx = x + this.font.width("Sort:") + 4;
-      String[] opts = {"count", "name", "recent"};
-      for (String o : opts) {
-         int w = this.font.width(o) + 8;
-         if (mouseX >= cx && mouseX < cx + w && mouseY >= y && mouseY < y + 17) return o;
-         cx += w + 3;
-      }
-      return null;
    }
 
    // Parcels tab render + popup + grid hit-test live in {@link ParcelsRenderer} (15b.4.d).
