@@ -448,6 +448,7 @@ public final class TownfolkNetwork {
             com.yucareux.townfolk.diag.VerboseLog.write("PRODUCTION_TARGET_PLAYER_DISABLE",
                "player=" + sp.getName().getString() + " town=" + townPos.toShortString()
                   + " item=" + itemId, "");
+            refreshAdminPanel(sp, level, townPos);
             return;
          }
          int min = Math.max(0, Math.min(9999, payload.min()));
@@ -456,7 +457,24 @@ public final class TownfolkNetwork {
          com.yucareux.townfolk.diag.VerboseLog.write("PRODUCTION_TARGET_PLAYER_SET",
             "player=" + sp.getName().getString() + " town=" + townPos.toShortString()
                + " item=" + itemId + " min=" + min + " max=" + max, "");
+         refreshAdminPanel(sp, level, townPos);
       });
+   }
+
+   /** Re-emit the full TownStateUpdatePayload after a server-side
+    *  edit so the client's open admin panel reflects the change
+    *  without the player having to close + reopen the screen. Other
+    *  handlers (animal plan, building permit, treasury withdraw, trade
+    *  fulfil) already do this via {@code TownAdminService.openAdminPanel};
+    *  this is the shared helper so production-target edits get the
+    *  same treatment. */
+   private static void refreshAdminPanel(net.minecraft.server.level.ServerPlayer sp,
+                                          net.minecraft.server.level.ServerLevel level,
+                                          net.minecraft.core.BlockPos townPos) {
+      var be = level.getBlockEntity(townPos);
+      if (be instanceof com.yucareux.townfolk.blockentity.TownSquareBlockEntity town) {
+         com.yucareux.townfolk.dialogue.TownAdminService.openAdminPanel(sp, level, town);
+      }
    }
 
    /** Common admin-permission gate for town-scoped C→S payloads.
