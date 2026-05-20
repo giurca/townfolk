@@ -205,15 +205,18 @@ public final class StorageVerb {
          }
          final String verbBody = body;
          final boolean depositingFinal = depositing;
+         final String verbKeyFinal = ctx.verbKey();
+         final String actionRawFinal = ctx.actionRaw();
          BlockTaskQueue.enqueue(level, actor, new BlockTaskQueue.BlockTask(
             actor.getUUID(), containerPos,
             level.getGameTime() + 20L * 60,
             depositingFinal ? "deposit" : "withdraw",
             (lvl, v, p) -> {
-               // Re-fire the verb on arrival; reuse the parsed body so
-               // the label hint + qty + item are preserved exactly.
+               // Re-fire the verb on arrival; thread the original ctx
+               // fields (verbKey + actionRaw) through so any future
+               // logic that consults them sees the original match.
                VerbContext arrived = new VerbContext(lvl, town, v, self,
-                  depositingFinal ? "deposit" : "withdraw", verbBody, verbBody);
+                  verbKeyFinal, verbBody, actionRawFinal);
                runImpl(arrived, depositingFinal);
                return (depositingFinal ? "delivered " : "fetched ")
                   + StorageHelpers.shortName(itemId.toString()) + " at " + p.toShortString();

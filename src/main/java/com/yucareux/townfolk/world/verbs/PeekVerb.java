@@ -47,12 +47,14 @@ public final class PeekVerb {
                final BlockPos lpFinal = labelPos;
                final var townRef = ctx.town();
                final var selfRef = ctx.self();
+               final String verbKeyFinal = ctx.verbKey();
+               final String actionRawFinal = ctx.actionRaw();
                BlockTaskQueue.enqueue(ctx.level(), ctx.actor(), new BlockTaskQueue.BlockTask(
                   ctx.actor().getUUID(), lpFinal,
                   ctx.level().getGameTime() + 20L * 60, "peek",
                   (lvl, v, p) -> {
                      VerbContext arrived = new VerbContext(lvl, townRef, v, selfRef,
-                        "peek", hint, hint);
+                        verbKeyFinal, hint, actionRawFinal);
                      run(arrived);
                      return "peeked the named barrel at " + p.toShortString();
                   }));
