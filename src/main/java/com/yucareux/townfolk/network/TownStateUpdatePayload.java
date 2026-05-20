@@ -172,7 +172,9 @@ public record TownStateUpdatePayload(
       boolean playerSetJob,
       List<ItemCount> inventory,
       // ── new for Villagers-tab filter/sort ──
-      String profession         // "none" / "farmer" / "shepherd" / "butcher" / "mason"
+      String profession,        // "none" / "farmer" / "shepherd" / "butcher" / "mason"
+      // ── Stage 12a: hunger 0..100, 100 = full, 0 = starving ──
+      int hunger
    ) {}
 
    private static final int MAX_LOG_MESSAGE_CHARS = 4096;
@@ -338,6 +340,7 @@ public record TownStateUpdatePayload(
             buf.writeVarInt(s.inventory().size());
             for (ItemCount ic : s.inventory()) ITEM_CODEC.encode(buf, ic);
             buf.writeUtf(s.profession());
+            buf.writeVarInt(s.hunger());
          },
          buf -> {
             UUID id = buf.readUUID();
@@ -369,9 +372,10 @@ public record TownStateUpdatePayload(
             java.util.ArrayList<ItemCount> inv = new java.util.ArrayList<>(invN);
             for (int i = 0; i < invN; i++) inv.add(ITEM_CODEC.decode(buf));
             String profession = buf.readUtf();
+            int hunger = buf.readVarInt();
             return new VillagerSummary(id, name, role, seed, backstory, alive,
                calls, inT, outT, cost, beliefs, pins, recentCount, lastCompact, todos,
-               packedPos, hp, maxHp, act, ph, pj, inv, profession);
+               packedPos, hp, maxHp, act, ph, pj, inv, profession, hunger);
          }
       );
 

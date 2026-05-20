@@ -65,6 +65,15 @@ public final class ScheduleService {
     *  schedule never gets to send them home or to bed. */
    private static final Map<UUID, String> LAST_PHASE = new ConcurrentHashMap<>();
 
+   /** Per-villager last in-game day on which hunger was decayed.
+    *  Guards against multiple decays during the dawn-phase poll
+    *  window (dawn lasts 1000 ticks = ~10 polls). */
+   private static final Map<UUID, Long> LAST_HUNGER_DECAY_DAY = new ConcurrentHashMap<>();
+
+   /** Hunger lost per game day at dawn. 25 = ~4 missed days to
+    *  starvation; slow-burn pace per the design directive. */
+   private static final int HUNGER_DAILY_DECAY = 25;
+
    /** Default override duration when a player issues an explicit movement
     *  command — long enough for the villager to actually arrive AND get a
     *  little settled time before the schedule resumes. */
@@ -171,9 +180,27 @@ public final class ScheduleService {
       }
 
       // Day rollover: clear any stale leisure plan so the next evening
-      // rolls fresh. Dawn is the natural reset point.
+      // rolls fresh. Dawn is the natural reset point. Also drain
+      // hunger by HUNGER_DAILY_DECAY once per dawn — skipping a meal
+      // means the villager wakes up hungrier than they went to bed.
+      // Guarded by per-villager last-decay-day so a poll storm at
+      // dawn doesn't decay multiple times.
       if ("dawn".equals(phase)) {
          com.yucareux.townfolk.world.leisure.LeisureService.clearChoice(v.getUUID());
+         long today = level.getGameTime() / 24000L;
+         Long lastDecay = LAST_HUNGER_DECAY_DAY.get(v.getUUID());
+         if (lastDecay == null || lastDecay != today) {
+            LAST_HUNGER_DECAY_DAY.put(v.getUUID(), today);
+            int before = comp.hunger();
+            int after  = Math.max(0, before - HUNGER_DAILY_DECAY);
+            if (after != before) {
+               v.setData(com.yucareux.townfolk.registry.ModRegistries.LLM_VILLAGER.get(),
+                  comp.withHunger(after));
+               comp = v.getData(com.yucareux.townfolk.registry.ModRegistries.LLM_VILLAGER.get());
+               com.yucareux.townfolk.diag.VerboseLog.write("HUNGER_DECAY",
+                  "villager=" + nameOf(v) + " " + before + " → " + after, "");
+            }
+         }
       }
 
       // Yield to LeisureService whenever a plan is in flight AND the

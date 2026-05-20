@@ -41,26 +41,45 @@ public record LlmVillagerComponent(
    List<FieldRegion> parcels
 ) {
 
-   /** Bundles the player-set anchor flags so the parent record can stay under
-    *  Mojang Codec's 16-field limit. {@code home} / {@code job} == "the player
-    *  explicitly assigned this villager a home/workstation". Preserves the
-    *  external accessor surface ({@link #playerSetHome()} / {@link #playerSetJob()})
+   /** Bundles the player-set anchor flags + hunger so the parent
+    *  record stays under Mojang Codec's 16-field limit. {@code home}
+    *  / {@code job} == "the player explicitly assigned this villager
+    *  a home/workstation". {@code hunger} is 0..100, where 100 = full,
+    *  0 = starving (Stage 12). Preserves the external accessor
+    *  surface ({@link #playerSetHome()} / {@link #playerSetJob()})
     *  so call sites don't need to change. */
-   public record Anchors(boolean home, boolean job) {
-      public static final Anchors NONE = new Anchors(false, false);
+   public record Anchors(boolean home, boolean job, int hunger) {
+      public Anchors {
+         hunger = Math.max(0, Math.min(100, hunger));
+      }
+      public static final Anchors NONE = new Anchors(false, false, 100);
       public static final com.mojang.serialization.Codec<Anchors> CODEC =
          com.mojang.serialization.codecs.RecordCodecBuilder.create(i -> i.group(
             Codec.BOOL.optionalFieldOf("home", false).forGetter(Anchors::home),
-            Codec.BOOL.optionalFieldOf("job",  false).forGetter(Anchors::job)
+            Codec.BOOL.optionalFieldOf("job",  false).forGetter(Anchors::job),
+            Codec.INT.optionalFieldOf("hunger", 100).forGetter(Anchors::hunger)
          ).apply(i, Anchors::new));
-      public Anchors withHome(boolean v) { return new Anchors(v, job); }
-      public Anchors withJob(boolean v)  { return new Anchors(home, v); }
+      public Anchors withHome(boolean v)   { return new Anchors(v, job, hunger); }
+      public Anchors withJob(boolean v)    { return new Anchors(home, v, hunger); }
+      public Anchors withHunger(int v)     { return new Anchors(home, job, v); }
    }
 
    /** Backwards-compat accessor — preserves the {@code playerSetHome} reader
     *  used by every consumer of this component. */
    public boolean playerSetHome() { return anchors.home(); }
    public boolean playerSetJob()  { return anchors.job(); }
+   /** 0..100; 100 = freshly fed, 0 = starving. Decays ~25 per game
+    *  day via {@link com.yucareux.townfolk.world.ScheduleService}'s
+    *  dawn rollover; tops up when the villager eats. */
+   public int hunger() { return anchors.hunger(); }
+
+   /** Convenience for callers that prefer chaining on the component
+    *  directly (rather than {@code .withAnchors(c.anchors().withHunger(...))}). */
+   public LlmVillagerComponent withHunger(int v) {
+      return new LlmVillagerComponent(personaSeed, backstory, memoryNamespace, townSquarePos,
+         dialogueHistory, llmCalls, inputTokens, outputTokens, pinnedFacts, beliefs, memories,
+         lastCompactedDay, todos, anchors.withHunger(v), reflexes, parcels);
+   }
 
    public static final int MAX_HISTORY = 24;
    public static final int MAX_PINNED = 100;

@@ -574,7 +574,8 @@ public final class TownAdminService {
             packedPos, hp, maxHp, activity,
             component.playerSetHome(), component.playerSetJob(),
             invOut,
-            profession
+            profession,
+            component.hunger()
          ));
          // Tally for overview counters. "sleeping" is authoritative;
          // anything else with an activity != "idle" is working; the

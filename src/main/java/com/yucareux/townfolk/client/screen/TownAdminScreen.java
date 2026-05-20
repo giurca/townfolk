@@ -1722,10 +1722,15 @@ public final class TownAdminScreen extends Screen {
       int taverns    = this.state.tavernCount();
       int popCap     = homes + (townHall ? 4 : 0);
       int popAlive   = this.state.populationAlive();
+      int hungry = 0;
+      for (var vs : this.state.villagers()) {
+         if (vs.alive() && vs.hunger() < 50) hungry++;
+      }
       String capLine = "Pop: " + popAlive + " / " + popCap
                      + "  ·  Homes: " + homes
                      + (townHall ? "  ·  ⛨ Town Hall (+4)" : "")
-                     + (taverns > 0 ? "  ·  Tavern × " + taverns : "");
+                     + (taverns > 0 ? "  ·  Tavern × " + taverns : "")
+                     + (hungry > 0 ? "  ·  " + hungry + " hungry" : "");
       String tradeLine = "Trade Posts: " + tradePosts
                        + "  ·  Prestige: " + prestige + " / "
                        + com.yucareux.townfolk.town.TownData.MAX_PRESTIGE;
@@ -2889,7 +2894,22 @@ public final class TownAdminScreen extends Screen {
       String act = prettifyActivity(v.activity());
       graphics.drawString(this.font, act, innerR - this.font.width(act), top, FG_DIM, true);
 
-      graphics.drawString(this.font, "Persona seed", innerL, top + 14, FG_DIM, true);
+      // Hunger bar mirrors the HP styling — 80-wide bar, fill colour
+      // shifts from green (full) through yellow → red (starving).
+      int hungerBarW = 80, hungerBarH = 5;
+      int hungerX = innerR - hungerBarW;
+      int hungerY = top + 12;
+      int hungerFill = (int) Math.round(hungerBarW * (v.hunger() / 100.0));
+      int hungerColor = v.hunger() >= 70 ? 0xFF6FA445   // green
+                       : v.hunger() >= 40 ? 0xFFE0B040  // amber
+                       :                    0xFFD55050; // red
+      graphics.fill(hungerX, hungerY, hungerX + hungerBarW, hungerY + hungerBarH, 0xFF2A1F15);
+      graphics.fill(hungerX, hungerY, hungerX + hungerFill, hungerY + hungerBarH, hungerColor);
+      String hungerLabel = "Hunger " + v.hunger() + "/100";
+      graphics.drawString(this.font, hungerLabel,
+         hungerX - this.font.width(hungerLabel) - 6, hungerY - 1, FG_FAINT, true);
+
+      graphics.drawString(this.font, "Persona seed", innerL, top + 22, FG_DIM, true);
 
       int backstoryTop = top + 100;
       graphics.drawString(this.font, "Backstory", innerL, backstoryTop, FG_DIM, true);
