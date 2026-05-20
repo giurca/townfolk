@@ -143,7 +143,7 @@ public final class ToolDispatcher {
          log(ctx.level, ctx.town, ctx.self, "stops to work");
       }),
 
-      def(new String[]{"give"},             false, false, ctx -> doGive(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"give"},             false, false, com.yucareux.townfolk.world.verbs.GiveVerb::run),
       def(new String[]{"claim_home", "claim home", "claim_bed", "claim bed"},
                                             false, false, com.yucareux.townfolk.world.verbs.ClaimHomeVerb::run),
       def(new String[]{"completed", "done"},false, false, com.yucareux.townfolk.world.verbs.CompleteVerb::run),
@@ -155,7 +155,7 @@ public final class ToolDispatcher {
       def(new String[]{"peek", "inspect"},  true,  false, ctx -> doPeekNearest(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
       def(new String[]{"attack", "defend", "flee"},
                                             false, false, com.yucareux.townfolk.world.verbs.ViolenceVerb::run),
-      def(new String[]{"hand"},             false, false, ctx -> doHand(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
+      def(new String[]{"hand"},             false, false, com.yucareux.townfolk.world.verbs.HandVerb::run),
       def(new String[]{"eat"},              false, false, ctx -> doEat(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
       def(new String[]{"harvest"},          true,  false, ctx -> doHarvest(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
       def(new String[]{"plant"},            true,  false, ctx -> doPlant(ctx.level, ctx.town, ctx.actor, ctx.self, ctx.body)),
@@ -227,54 +227,8 @@ public final class ToolDispatcher {
    // firstWord / verbExact removed in 16b.1 — VerbDef.matchKeyword
    // now owns the strict-prefix + alias-match logic.
 
-   // ----- give <name>: <count> <item> -----
-
-   private static final Pattern GIVE = Pattern.compile(
-      "([\\w' ]+?)\\s*:\\s*(\\d+)?\\s*(.+)", Pattern.CASE_INSENSITIVE);
-
-   private static void doGive(ServerLevel level, TownSquareBlockEntity town,
-                              Villager actor, VillagerEntry self, String body) {
-      Matcher m = GIVE.matcher(body);
-      if (!m.matches()) {
-         town.getTown().log().add(level.getGameTime(), TownLog.Level.INFO,
-            self.name() + " malformed give: " + body);
-         return;
-      }
-      String targetName = m.group(1).trim();
-      int count = m.group(2) == null ? 1 : Math.max(1, Math.min(64, Integer.parseInt(m.group(2))));
-      String itemName = m.group(3).trim().toLowerCase(Locale.ROOT).replace(' ', '_');
-
-      Item item = resolveItemFlexibly(itemName);
-      if (item == null) {
-         VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=unknown_item", "item=" + itemName);
-         town.getTown().log().add(level.getGameTime(), TownLog.Level.INFO,
-            self.name() + " can't give unknown item: " + itemName);
-         return;
-      }
-
-      // Find the recipient by name in this town.
-      TownData data = town.getTown();
-      VillagerEntry recipient = null;
-      for (VillagerEntry e : data.villagers()) {
-         if (e.name().equalsIgnoreCase(targetName)) { recipient = e; break; }
-      }
-      Entity recipientEnt = recipient == null ? null : level.getEntity(recipient.uuid());
-
-      BlockPos dropPos = recipientEnt == null ? actor.blockPosition() : recipientEnt.blockPosition();
-      ItemStack stack = new ItemStack(item, count);
-      ItemEntity drop = new ItemEntity(level, dropPos.getX() + 0.5, dropPos.getY() + 0.5, dropPos.getZ() + 0.5, stack);
-      drop.setPickUpDelay(20);
-      level.addFreshEntity(drop);
-
-      String summary = self.name() + " dropped " + count + "× " + item.getDescription().getString()
-         + " for " + (recipient == null ? targetName : recipient.name())
-         + " at " + dropPos.toShortString();
-      VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=gave", summary);
-      data.log().add(level.getGameTime(), TownLog.Level.INFO, summary);
-      ActionFeedback.recordOk(actor.getUUID(), level.getGameTime(),
-         "gave " + count + "× " + item.getDescription().getString()
-            + " to " + (recipient == null ? targetName : recipient.name()));
-   }
+   // doGive (and the GIVE regex) moved to {@link com.yucareux.townfolk.world.verbs.GiveVerb}
+   // (which uses {@link com.yucareux.townfolk.world.verbs.StorageHelpers#GIVE}) — stage 17a.1.
 
    // doFollow moved to {@link com.yucareux.townfolk.world.verbs.FollowVerb} (stage 16b.2.a).
 
@@ -862,94 +816,8 @@ public final class ToolDispatcher {
       return rem;
    }
 
-   // ───── hand <item> to <player> ─────
+   // doHand (and HAND_PATTERN) moved to {@link com.yucareux.townfolk.world.verbs.HandVerb} (17a.1).
 
-   private static final Pattern HAND_PATTERN = Pattern.compile(
-      "(?:(\\d+|all)\\s+)?(.+?)\\s+to\\s+(.+)", Pattern.CASE_INSENSITIVE);
-
-   private static void doHand(ServerLevel level, TownSquareBlockEntity town,
-                              Villager actor, VillagerEntry self, String body) {
-      Matcher m = HAND_PATTERN.matcher(body);
-      if (!m.matches()) {
-         ActionFeedback.recordFail(actor.getUUID(), level.getGameTime(),
-            "hand — malformed (expected \"hand [N] <item> to <player>\")");
-         return;
-      }
-      int qty = m.group(1) == null ? 1
-               : "all".equalsIgnoreCase(m.group(1)) ? Integer.MAX_VALUE
-               : Math.max(1, Math.min(64, Integer.parseInt(m.group(1))));
-      String itemTok = m.group(2).trim();
-      String playerTok = m.group(3).trim().toLowerCase(Locale.ROOT);
-
-      Item item = RecipeCatalog.resolveItemOpt(itemTok).orElse(null);
-      if (item == null) {
-         ActionFeedback.recordFail(actor.getUUID(), level.getGameTime(),
-            "hand — unknown item \"" + itemTok + "\"");
-         return;
-      }
-
-      // Find the target player. "me", "the player", or by name.
-      Player target = null;
-      Player nearest = level.getNearestPlayer(actor, 16.0);
-      if (playerTok.contains("me") || playerTok.contains("player") || playerTok.contains("you")) {
-         target = nearest;
-      } else {
-         for (var p : level.players()) {
-            if (playerTok.contains(p.getName().getString().toLowerCase(Locale.ROOT))) {
-               target = p; break;
-            }
-         }
-         if (target == null) target = nearest;
-      }
-      if (target == null || actor.distanceToSqr(target) > 144.0) {
-         ActionFeedback.recordFail(actor.getUUID(), level.getGameTime(),
-            "hand — no player close enough");
-         return;
-      }
-
-      var inv = actor.getInventory();
-      int have = 0;
-      for (int i = 0; i < inv.getContainerSize(); i++) {
-         var s = inv.getItem(i);
-         if (s.getItem() == item) have += s.getCount();
-      }
-      int give = Math.min(qty, have);
-      if (give <= 0) {
-         ActionFeedback.recordFail(actor.getUUID(), level.getGameTime(),
-            "hand " + itemTok + " — none in your bag");
-         return;
-      }
-
-      // Transfer: try player inventory first, drop the overflow at player's feet.
-      ItemStack stack = new ItemStack(item, give);
-      // Subtract from villager.
-      int need = give;
-      for (int i = 0; i < inv.getContainerSize() && need > 0; i++) {
-         var s = inv.getItem(i);
-         if (s.getItem() != item) continue;
-         int take = Math.min(s.getCount(), need);
-         s.shrink(take);
-         need -= take;
-         if (s.isEmpty()) inv.setItem(i, ItemStack.EMPTY);
-      }
-      if (!target.addItem(stack)) {
-         net.minecraft.world.entity.item.ItemEntity drop = new net.minecraft.world.entity.item.ItemEntity(
-            level, target.getX(), target.getY(), target.getZ(), stack);
-         drop.setPickUpDelay(0);
-         level.addFreshEntity(drop);
-      }
-      long day = level.getGameTime() / 24000L;
-      String summary = self.name() + " handed " + give + "× " + shortName(BuiltInRegistries.ITEM.getKey(item).toString())
-         + " to " + target.getName().getString();
-      VerboseLog.write("ACTION_RESULT", "actor=" + self.name() + " status=handed", summary);
-      town.getTown().log().add(level.getGameTime(), TownLog.Level.INFO, summary);
-      com.yucareux.townfolk.villager.MemoryStore.write(actor, "give", day,
-         "I handed " + give + "× " + shortName(BuiltInRegistries.ITEM.getKey(item).toString())
-            + " to " + target.getName().getString() + ".");
-      ActionFeedback.recordOk(actor.getUUID(), level.getGameTime(),
-         "handed " + give + "× " + shortName(BuiltInRegistries.ITEM.getKey(item).toString())
-            + " to " + target.getName().getString());
-   }
 
    // ───── eat ─────
 
