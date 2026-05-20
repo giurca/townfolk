@@ -125,6 +125,19 @@ public final class WorldSense {
       String profPath = profKey == null ? "unknown" : profKey.getPath();
       sb.append("Current profession (live, vanilla): ").append(profPath).append('\n');
 
+      // Stage 23d: identity stripe so the LLM can naturally write
+      // "young Tom" / "old Beatrix" / "she" / "he" in dialogue.
+      // Gender + age-category go in one line; raw day count surfaced
+      // separately so the LLM can reference time-of-life specifics
+      // ("nearly elder", "barely grown").
+      var compForIdentity = v.getData(com.yucareux.townfolk.registry.ModRegistries.LLM_VILLAGER.get());
+      var gender = compForIdentity.gender();
+      var ageCat = compForIdentity.ageCategory();
+      sb.append("Identity: ").append(gender.wireKey())
+        .append(" (").append(gender.pronounSubject()).append("/").append(gender.pronounObject()).append("), ")
+        .append(ageCat.displayLabel())
+        .append(" (").append(compForIdentity.ageDays()).append(" days old)\n");
+
       // Holding.
       var held = v.getMainHandItem();
       if (!held.isEmpty()) {

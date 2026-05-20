@@ -168,6 +168,15 @@ public final class ToolDispatcher {
       def(new String[]{"breed"},            true,  false, com.yucareux.townfolk.world.verbs.LivestockVerb::runBreed),
       def(new String[]{"feed"},             true,  false, com.yucareux.townfolk.world.verbs.FeedVerb::run),
       def(new String[]{"water"},            true,  false, com.yucareux.townfolk.world.verbs.WaterVerb::run),
+
+      // ── Stage 23 / 20b: fluid verbs ──
+      // fill + drain transfer mB between a held bucket-like item and
+      // a registered tank (works with any IFluidHandler — Create,
+      // Mekanism, etc.). pour is a narrative-only emote.
+      def(new String[]{"fill"},             false, false, com.yucareux.townfolk.world.verbs.FillVerb::run),
+      def(new String[]{"drain"},            false, false, com.yucareux.townfolk.world.verbs.DrainVerb::run),
+      def(new String[]{"pour"},             false, false, com.yucareux.townfolk.world.verbs.PourVerb::run),
+
       def(new String[]{"remember", "commit"},
                                             false, false, com.yucareux.townfolk.world.verbs.RememberVerb::run),
       def(new String[]{"reflex", "standing_order", "rule"},
