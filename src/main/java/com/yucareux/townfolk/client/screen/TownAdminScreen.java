@@ -321,21 +321,8 @@ public final class TownAdminScreen extends Screen {
 
    // ----- Overview tab -----
 
-   /** Y offsets used by BOTH initOverviewTabWidgets and renderOverviewTab so
-    *  widgets and labels can't drift. All measured down from the tab's content
-    *  top. Tweak in one place if the layout changes. */
-   private static final int OV_PULSE_Y      = 4;
-   /** One row of pulse cards (counters only). */
-   private static final int OV_PULSE_H      = UiTheme.CARD_HEIGHT;
-   /** Town-status summary lives between the pulse strip and the Town
-    *  Name input. Two right-aligned lines (cap, trade) need ~22 px of
-    *  vertical room. The label moves down by that amount so the stats
-    *  never overlap the pulse cards above. */
-   private static final int OV_NAME_LABEL_Y = OV_PULSE_Y + OV_PULSE_H + 28;
-   private static final int OV_NAME_BOX_Y   = OV_NAME_LABEL_Y + 12;
-   private static final int OV_STATUS_Y     = OV_NAME_BOX_Y + 30;
-   private static final int OV_REFRESH_Y    = OV_STATUS_Y;
-   private static final int OV_FACTS_Y      = OV_STATUS_Y + 30;
+   // OV_* layout constants now live on {@link OverviewRenderer} so the
+   // render and init paths share one source of truth (stage 15b.4.b).
 
    private void initOverviewTabWidgets(int paneL, int paneR, int top, int bottom) {
       int innerL = paneL + UiTheme.PADDING;
@@ -346,7 +333,7 @@ public final class TownAdminScreen extends Screen {
       // still floating 4 px above its labels).
       int t = top + INIT_TO_RENDER_TOP;
 
-      this.townNameBox = new EditBox(this.font, innerL, t + OV_NAME_BOX_Y, width - 80, 20,
+      this.townNameBox = new EditBox(this.font, innerL, t + OverviewRenderer.OV_NAME_BOX_Y, width - 80, 20,
          Component.literal("town name"));
       this.townNameBox.setMaxLength(60);
       this.townNameBox.setValue(this.state.townName());
@@ -357,13 +344,13 @@ public final class TownAdminScreen extends Screen {
          if (!name.isEmpty()) {
             PacketDistributor.sendToServer(AdminActionPayload.renameTown(townPos(), name));
          }
-      }).bounds(innerR - 74, t + OV_NAME_BOX_Y, 74, 20).build());
+      }).bounds(innerR - 74, t + OverviewRenderer.OV_NAME_BOX_Y, 74, 20).build());
 
       addRenderableWidget(Button.builder(Component.literal("Refresh"), b ->
          PacketDistributor.sendToServer(AdminActionPayload.refreshSpend(townPos()))
-      ).bounds(innerR - 74, t + OV_REFRESH_Y - 2, 74, 20).build());
+      ).bounds(innerR - 74, t + OverviewRenderer.OV_REFRESH_Y - 2, 74, 20).build());
 
-      int factsListTop = t + OV_FACTS_Y + 14;
+      int factsListTop = t + OverviewRenderer.OV_FACTS_Y + 14;
       this.newTownFactBox = new EditBox(this.font, innerL, bottom - 22, width - 56, 20,
          Component.literal("new town fact"));
       this.newTownFactBox.setMaxLength(240);
@@ -1795,7 +1782,7 @@ public final class TownAdminScreen extends Screen {
             int contentTop = t + headerH + 16;
             int contentBottom = b - PADDING;
             switch (this.tab) {
-               case OVERVIEW -> renderOverviewTab(graphics, l, r, contentTop, contentBottom);
+               case OVERVIEW -> OverviewRenderer.render(this, graphics, l, r, contentTop, contentBottom);
                case VILLAGERS -> renderVillagersTab(graphics, l, r, contentTop, contentBottom, lmX, lmY);
                case RESOURCES -> renderResourcesTab(graphics, l, r, contentTop, contentBottom, lmX, lmY);
                case PARCELS -> renderParcelsTab(graphics, l, r, contentTop, contentBottom, lmX, lmY);
@@ -1874,159 +1861,13 @@ public final class TownAdminScreen extends Screen {
       graphics.drawString(this.font, label, x + 8, y + 3, active ? FG_ACCENT : FG_DIM, true);
    }
 
-   private void renderOverviewTab(GuiGraphics graphics, int paneL, int paneR, int top, int bottom) {
-      renderOverviewPulse(graphics, paneL, paneR, top + OV_PULSE_Y);
-      renderOverviewBody(graphics, paneL, paneR, top, bottom);
-   }
+   // Overview tab render lives in {@link OverviewRenderer} (stage 15b.4.b).
 
-   /** Pulse strip: a row of 6 small cards across the top of Overview,
-    *  built for at-a-glance scale to 50+ villagers — population +
-    *  activity breakdown + day-over-day deltas.
-    *
-    *  All counters come from server-side tallies in
-    *  {@link TownStateUpdatePayload} so the UI doesn't have to walk the
-    *  villager list each frame. The Resources tab handles per-item
-    *  stockpile readout; we don't duplicate that here. */
-   private void renderOverviewPulse(GuiGraphics graphics, int paneL, int paneR, int top) {
-      int innerL = paneL + UiTheme.PADDING;
-      int innerR = paneR - UiTheme.PADDING;
-      int total = innerR - innerL;
-      int gap = UiTheme.GAP_MEDIUM;
-      int cardW = (total - 5 * gap) / 6;
-      int cardH = UiTheme.CARD_HEIGHT;
-
-      int alive = this.state.populationAlive();
-      int tot   = this.state.populationTotal();
-      int work  = this.state.workingCount();
-      int idle  = this.state.idleCount();
-      int sleep = this.state.sleepingCount();
-      int births = this.state.birthsToday();
-      int deaths = this.state.deathsToday();
-
-      int x = innerL;
-      UiCard.draw(graphics, this.font, x, top, cardW, cardH,
-         "Residents", alive + " / " + tot,
-         (tot - alive) == 0 ? "all alive" : (tot - alive) + " gone");
-      x += cardW + gap;
-      UiCard.draw(graphics, this.font, x, top, cardW, cardH,
-         "Working", String.valueOf(work),
-         alive == 0 ? "—" : pct(work, alive) + "% busy");
-      x += cardW + gap;
-      UiCard.draw(graphics, this.font, x, top, cardW, cardH,
-         "Idle", String.valueOf(idle),
-         alive == 0 ? "—" : pct(idle, alive) + "% idle");
-      x += cardW + gap;
-      UiCard.draw(graphics, this.font, x, top, cardW, cardH,
-         "Sleeping", String.valueOf(sleep),
-         alive == 0 ? "—" : pct(sleep, alive) + "% in bed");
-      x += cardW + gap;
-      UiCard.draw(graphics, this.font, x, top, cardW, cardH,
-         "Births today", String.valueOf(births), births == 0 ? "—" : "+" + births);
-      x += cardW + gap;
-      UiCard.draw(graphics, this.font, x, top, cardW, cardH,
-         "Deaths today", String.valueOf(deaths), deaths == 0 ? "—" : "-" + deaths);
-   }
-
-   private static String pct(int part, int whole) {
-      if (whole <= 0) return "0";
-      return String.valueOf(Math.round(part * 100.0f / whole));
-   }
-
-   private static String shortItemName(String id) {
+   /** Strip the {@code namespace:} prefix and turn underscores into
+    *  spaces. Used by Resources/Trade cells for short labels. */
+   static String shortItemName(String id) {
       int colon = id.indexOf(':');
       return (colon < 0 ? id : id.substring(colon + 1)).replace('_', ' ');
-   }
-
-   private void renderOverviewBody(GuiGraphics graphics, int paneL, int paneR, int top, int bottom) {
-      int innerL = paneL + UiTheme.PADDING;
-      int innerR = paneR - UiTheme.PADDING;
-
-      // Town status header — right-aligned under the pulse strip.
-      // Each block of scalars sits on its own line so the player can
-      // scan the three primary indicators (capacity, trade, prestige)
-      // at a glance without the line truncating.
-      int tradePosts = this.state.tradePostCount();
-      int prestige   = this.state.prestige();
-      int homes      = this.state.homeCount();
-      boolean townHall = this.state.hasTownHall();
-      int taverns    = this.state.tavernCount();
-      int popCap     = homes + (townHall ? 4 : 0);
-      int popAlive   = this.state.populationAlive();
-      int hungry = 0;
-      for (var vs : this.state.villagers()) {
-         if (vs.alive() && vs.hunger() < 50) hungry++;
-      }
-      String capLine = "Pop: " + popAlive + " / " + popCap
-                     + "  ·  Homes: " + homes
-                     + (townHall ? "  ·  ⛨ Town Hall (+4)" : "")
-                     + (taverns > 0 ? "  ·  Tavern × " + taverns : "")
-                     + (hungry > 0 ? "  ·  " + hungry + " hungry" : "");
-      String tradeLine = "Trade Posts: " + tradePosts
-                       + "  ·  Prestige: " + prestige + " / "
-                       + com.yucareux.townfolk.town.TownData.MAX_PRESTIGE;
-      // Two stat lines sit in the 28-px gap between the pulse strip and
-      // the Town Name label. Each line is ~10 px tall.
-      UiText.rightFaint(graphics, this.font, capLine,
-         innerR, top + OV_PULSE_Y + OV_PULSE_H + 4);
-      UiText.rightFaint(graphics, this.font, tradeLine,
-         innerR, top + OV_PULSE_Y + OV_PULSE_H + 14);
-
-      // Town name label sits just above the (already-placed) EditBox.
-      UiText.muted(graphics, this.font, "Town name", innerL, top + OV_NAME_LABEL_Y);
-
-      // OpenRouter status line.
-      int blockY = top + OV_STATUS_Y;
-      UiText.muted(graphics, this.font, "OpenRouter", innerL, blockY);
-      String status = this.state.openrouterStatus();
-      String statusLine;
-      int statusFg = FG_PRIMARY;
-      if ("disabled".equals(status)) {
-         statusLine = "disabled (no API key)";
-         statusFg = FG_FAINT;
-      } else if ("loading".equals(status)) {
-         statusLine = "fetching...";
-         statusFg = FG_DIM;
-      } else if (status.startsWith("error")) {
-         statusLine = status;
-         statusFg = FG_ERROR;
-      } else if (this.state.usage().isPresent() || this.state.limit().isPresent()) {
-         double usage = this.state.usage().orElse(0.0);
-         double limit = this.state.limit().orElse(0.0);
-         if (this.state.limit().isPresent()) {
-            statusLine = String.format(Locale.ROOT, "spent $%.4f / credits $%.2f", usage, limit);
-         } else {
-            statusLine = String.format(Locale.ROOT, "spent $%.4f", usage);
-         }
-      } else {
-         statusLine = "(refresh to fetch)";
-         statusFg = FG_FAINT;
-      }
-      graphics.drawString(this.font, statusLine, innerL, blockY + 12, statusFg, true);
-
-      // Town pinned facts — placement matches OV_FACTS_Y used by initOverviewTabWidgets.
-      int factsTop = top + OV_FACTS_Y;
-      UiText.muted(graphics, this.font,
-         "Town-shared facts (known to every resident)",
-         innerL, factsTop);
-      int rowY = factsTop + 14;
-      int rowH = 22;
-      int listBottom = bottom - 30;
-      List<TownStateUpdatePayload.PinSummary> facts = this.state.townFacts();
-      if (facts.isEmpty()) {
-         graphics.drawString(this.font, "(none yet — add one below)",
-            innerL, rowY + 4, FG_FAINT, true);
-      } else {
-         for (TownStateUpdatePayload.PinSummary p : facts) {
-            if (rowY + rowH > listBottom) break;
-            graphics.fill(innerL, rowY, innerR - 50, rowY + rowH - 2, ROW_BG);
-            int textFg = "resolved".equals(p.status()) ? FG_RESOLVED : FG_PRIMARY;
-            String text = p.text();
-            int maxW = (innerR - 50) - innerL - 8;
-            String shown = truncate(text, maxW);
-            graphics.drawString(this.font, shown, innerL + 4, rowY + 6, textFg, true);
-            rowY += rowH;
-         }
-      }
    }
 
    // ───────── Resources tab (icon grid + popup drill-down) ─────────
