@@ -1458,20 +1458,11 @@ public final class TownAdminScreen extends Screen {
    }
 
 
-   /** Schedule activity → friendlier label for inline display. */
+   /** Schedule activity wire key → friendlier label for inline
+    *  display. Single line shim onto {@link com.yucareux.townfolk.world.Activity#displayLabel()}
+    *  for the renderers that still pass the wire string. */
    static String prettifyActivity(String a) {
-      if (a == null || a.isEmpty()) return "idle";
-      return switch (a) {
-         case "waking"        -> "waking up";
-         case "going_to_work" -> "heading to work";
-         case "at_work"       -> "at work";
-         case "going_home"    -> "heading home";
-         case "at_home"       -> "at home";
-         case "sleeping"      -> "sleeping";
-         case "following"     -> "following";
-         case "idle"          -> "idle";
-         default              -> a;
-      };
+      return com.yucareux.townfolk.world.Activity.fromWire(a).displayLabel();
    }
 
    private void renderSpawnForm(GuiGraphics g, int paneL, int paneR, int top, int bottom,

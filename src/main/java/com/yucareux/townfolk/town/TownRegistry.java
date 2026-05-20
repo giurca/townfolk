@@ -149,12 +149,11 @@ public final class TownRegistry {
       int alive = all.size();
       int atWork = 0, atHome = 0, sleeping = 0;
       for (VillagerSnapshot s : all) {
-         switch (s.activity) {
-            case "at_work", "going_to_work" -> atWork++;
-            case "at_home", "going_home"    -> atHome++;
-            case "sleeping"                 -> sleeping++;
-            default -> {}
-         }
+         com.yucareux.townfolk.world.Activity a =
+            com.yucareux.townfolk.world.Activity.fromWire(s.activity);
+         if (a.isWorking())       atWork++;
+         else if (a.isAtHome())   atHome++;
+         else if (a.isSleeping()) sleeping++;
       }
       // Top-3 most-abundant items in town total.
       Map<ResourceLocation, Integer> totals = totalInventory(level, town);

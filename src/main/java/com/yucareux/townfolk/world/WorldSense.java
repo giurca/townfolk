@@ -103,21 +103,18 @@ public final class WorldSense {
       } else {
          // Prefer the schedule's intent — gives the LLM "I'm heading home for
          // the night" rather than just "walking somewhere".
-         String schedActivity = ScheduleService.activityOf(v.getUUID());
+         Activity schedActivity = ScheduleService.activityEnumOf(v.getUUID());
          String activity;
          if (v.isSleeping()) activity = "sleeping in my bed";
-         else switch (schedActivity) {
-            case "going_to_work" -> activity = "walking to my workstation";
-            case "at_work"       -> activity = "at my workstation, working";
-            case "going_home"    -> activity = "heading home";
-            case "at_home"       -> activity = "at home, settling in";
-            case "sleeping"      -> activity = "trying to get to bed";
-            case "waking"        -> activity = "just waking up";
-            default -> {
-               if (v.getNavigation().isInProgress()) activity = "walking somewhere";
-               else if (v.getDeltaMovement().horizontalDistanceSqr() > 0.01) activity = "moving";
-               else activity = "standing idle";
-            }
+         else if (schedActivity == Activity.IDLE) {
+            // IDLE collapses to a movement-aware fallback so the LLM
+            // sees "walking somewhere" instead of just "standing idle"
+            // when the villager has a path active.
+            if (v.getNavigation().isInProgress()) activity = "walking somewhere";
+            else if (v.getDeltaMovement().horizontalDistanceSqr() > 0.01) activity = "moving";
+            else activity = schedActivity.llmPhrase();
+         } else {
+            activity = schedActivity.llmPhrase();
          }
          sb.append("Current activity: ").append(activity).append('\n');
       }

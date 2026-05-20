@@ -52,7 +52,7 @@ public final class ScheduleService {
    private static final double SLEEP_RADIUS_SQ = 4.0;     // close enough to enter bed
 
    /** Current schedule activity, keyed by villager UUID. Transient. */
-   private static final Map<UUID, String> ACTIVITY = new ConcurrentHashMap<>();
+   private static final Map<UUID, Activity> ACTIVITY = new ConcurrentHashMap<>();
 
    /** Suspend-until tick by villager. While suspended, schedule yields to whatever
     *  the villager (or the player via IntentExecutor) is doing. Transient. */
@@ -86,8 +86,15 @@ public final class ScheduleService {
     *  the suspend (see {@link #onTick}). */
    public static final long PLAYER_OVERRIDE_TICKS = 20L * 90;       // 90 seconds
 
+   /** Wire-key form for callers that serialize/compare strings (LLM
+    *  prompt, payload, memory store). Use {@link #activityEnumOf}
+    *  when the caller wants the enum directly. */
    public static String activityOf(UUID actor) {
-      return ACTIVITY.getOrDefault(actor, "idle");
+      return activityEnumOf(actor).wireKey();
+   }
+
+   public static Activity activityEnumOf(UUID actor) {
+      return ACTIVITY.getOrDefault(actor, Activity.IDLE);
    }
 
    /** Pause schedule decisions for {@code actor} for {@code durationTicks} of
@@ -124,7 +131,7 @@ public final class ScheduleService {
 
             // Yield to active player commands.
             if (FollowService.peek(v.getUUID()).isPresent()) {
-               ACTIVITY.put(v.getUUID(), "following");
+               setActivity(v, Activity.FOLLOWING);
                LAST_PHASE.put(v.getUUID(), phase);
                continue;
             }
@@ -157,7 +164,7 @@ public final class ScheduleService {
                com.yucareux.townfolk.diag.VerboseLog.write("SCHED_SUSPENDED",
                   "villager=" + nameOf(v) + " phase=" + phase + " ticksLeft=" + left,
                   "schedule skipped — block-task grace window blocks bedtime nav!");
-               ACTIVITY.putIfAbsent(v.getUUID(), "idle");
+               ACTIVITY.putIfAbsent(v.getUUID(), Activity.IDLE);
                continue;
             }
 
@@ -168,12 +175,12 @@ public final class ScheduleService {
    }
 
    private static void tickVillager(ServerLevel level, Villager v, LlmVillagerComponent comp, String phase) {
-      String desired = desiredActivity(comp, phase);
-      String current = ACTIVITY.get(v.getUUID());
+      Activity desired = desiredActivity(comp, phase);
+      Activity current = ACTIVITY.get(v.getUUID());
       String name = nameOf(v);
 
       // Sleeping handler is special — we may need to wake them at dawn.
-      if (v.isSleeping() && !desired.equals("sleeping")) {
+      if (v.isSleeping() && desired != Activity.SLEEPING) {
          v.stopSleeping();
          VerboseLog.write("SCHED_WAKE",
             "villager=" + name + " phase=" + phase, "");
@@ -220,10 +227,10 @@ public final class ScheduleService {
              && choice.activity() != com.yucareux.townfolk.world.leisure.LeisureActivity.STAY_HOME) {
             // Reflect the leisure activity in the status string so the
             // admin UI and pulse strip read it ("at_tavern", "wandering").
-            String label = switch (choice.activity()) {
-               case TAVERN -> "at_tavern";
-               case WALK   -> "wandering";
-               default      -> "idle";
+            Activity label = switch (choice.activity()) {
+               case TAVERN -> Activity.AT_TAVERN;
+               case WALK   -> Activity.WANDERING;
+               default      -> Activity.IDLE;
             };
             setActivity(v, label);
             return;
@@ -232,57 +239,57 @@ public final class ScheduleService {
       }
 
       switch (desired) {
-         case "going_to_work" -> {
+         case GOING_TO_WORK -> {
             GlobalPos job = comp.playerSetJob()
                ? v.getBrain().getMemory(MemoryModuleType.JOB_SITE).orElse(null) : null;
             if (job == null) {
                VerboseLog.write("SCHED_TICK", "villager=" + name + " phase=" + phase
-                  + " desired=" + desired,
+                  + " desired=" + desired.wireKey(),
                   "no JOB_SITE memory (playerSetJob=" + comp.playerSetJob() + ") → idle");
-               setActivity(v, "idle"); return;
+               setActivity(v, Activity.IDLE); return;
             }
             double d = v.distanceToSqr(job.pos().getX() + 0.5, job.pos().getY(), job.pos().getZ() + 0.5);
             if (d < 4.0) {
-               setActivity(v, "at_work");
+               setActivity(v, Activity.AT_WORK);
             } else if (!v.getNavigation().isInProgress()) {
                NavCall.moveTo(v, job.pos(), WORK_SPEED, "ScheduleService.work");
-               setActivity(v, "going_to_work");
+               setActivity(v, Activity.GOING_TO_WORK);
                VerboseLog.write("SCHED_TICK", "villager=" + name + " phase=" + phase
                   + " desired=going_to_work", "moveTo=" + job.pos().toShortString() + " distSq=" + d);
             }
          }
-         case "at_work" -> {
-            if (!"at_work".equals(current)) {
-               setActivity(v, "at_work");
+         case AT_WORK -> {
+            if (current != Activity.AT_WORK) {
+               setActivity(v, Activity.AT_WORK);
                long day = level.getGameTime() / 24000L;
                MemoryStore.write(v, "schedule", day, "I settled in at my workstation for the day's work.");
             }
          }
-         case "going_home" -> {
+         case GOING_HOME -> {
             GlobalPos home = comp.playerSetHome()
                ? v.getBrain().getMemory(MemoryModuleType.HOME).orElse(null) : null;
             if (home == null) {
                VerboseLog.write("SCHED_TICK", "villager=" + name + " phase=" + phase
                   + " desired=going_home",
                   "no HOME memory (playerSetHome=" + comp.playerSetHome() + ") → idle");
-               setActivity(v, "idle"); return;
+               setActivity(v, Activity.IDLE); return;
             }
             double d = v.distanceToSqr(home.pos().getX() + 0.5, home.pos().getY(), home.pos().getZ() + 0.5);
             if (d < 9.0) {
-               setActivity(v, "at_home");
+               setActivity(v, Activity.AT_HOME);
             } else if (!v.getNavigation().isInProgress()) {
                NavCall.moveTo(v, home.pos(), HOME_SPEED, "ScheduleService.home");
-               setActivity(v, "going_home");
+               setActivity(v, Activity.GOING_HOME);
                VerboseLog.write("SCHED_TICK", "villager=" + name + " phase=" + phase
                   + " desired=going_home", "moveTo=" + home.pos().toShortString() + " distSq=" + d);
             }
          }
-         case "at_home" -> {
-            if (!"at_home".equals(current)) {
-               setActivity(v, "at_home");
+         case AT_HOME -> {
+            if (current != Activity.AT_HOME) {
+               setActivity(v, Activity.AT_HOME);
             }
          }
-         case "sleeping" -> {
+         case SLEEPING -> {
             GlobalPos home = comp.playerSetHome()
                ? v.getBrain().getMemory(MemoryModuleType.HOME).orElse(null) : null;
             if (home == null) {
@@ -290,10 +297,10 @@ public final class ScheduleService {
                   + " desired=sleeping",
                   "no HOME memory (playerSetHome=" + comp.playerSetHome() + ") → idle. "
                   + "Player must press X aiming at a bed to assign one.");
-               setActivity(v, "idle"); return;
+               setActivity(v, Activity.IDLE); return;
             }
             if (v.isSleeping()) {
-               setActivity(v, "sleeping");
+               setActivity(v, Activity.SLEEPING);
                return;
             }
             BlockPos pos = home.pos();
@@ -325,13 +332,13 @@ public final class ScheduleService {
                      + " oldPos=" + pos.toShortString() + " oldBlock=" + blockKind
                      + " newPos=" + fallback.toShortString(),
                      "HOME bed was broken — auto-claimed a nearby free bed");
-                  setActivity(v, "going_home");
+                  setActivity(v, Activity.GOING_HOME);
                   NavCall.moveTo(v, fallback, HOME_SPEED, "ScheduleService.sleep.reassign");
                   return;
                }
                // No bed available — write a need-bed memory so dialogue
                // can hail the player, and stay idle for tonight.
-               setActivity(v, "idle");
+               setActivity(v, Activity.IDLE);
                long day = level.getGameTime() / 24000L;
                com.yucareux.townfolk.villager.MemoryStore.write(v, "need:bed", day,
                   "My bed at " + pos.toShortString() + " is gone (now " + blockKind
@@ -363,7 +370,7 @@ public final class ScheduleService {
                   v.moveTo(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5,
                      v.getYRot(), v.getXRot());
                   v.startSleeping(pos);
-                  setActivity(v, "sleeping");
+                  setActivity(v, Activity.SLEEPING);
                   long day = level.getGameTime() / 24000L;
                   MemoryStore.write(v, "schedule", day, "I climbed into bed for the night.");
                   VerboseLog.write("SCHED_SLEEP_OK", "villager=" + name
@@ -373,14 +380,14 @@ public final class ScheduleService {
                      + " block=" + net.minecraft.core.registries.BuiltInRegistries.BLOCK
                         .getKey(bedState.getBlock()).getPath(), "");
                } catch (Exception ex) {
-                  setActivity(v, "at_home");
+                  setActivity(v, Activity.AT_HOME);
                   VerboseLog.write("SCHED_SLEEP_FAIL", "villager=" + name
                      + " pos=" + pos.toShortString() + " isBed=" + isBed,
                      "startSleeping threw: " + ex);
                }
             } else if (!v.getNavigation().isInProgress()) {
                NavCall.moveTo(v, pos, HOME_SPEED, "ScheduleService.sleep");
-               setActivity(v, "going_home");
+               setActivity(v, Activity.GOING_HOME);
                VerboseLog.write("SCHED_TICK", "villager=" + name + " phase=" + phase
                   + " desired=sleeping",
                   "walking to bed " + pos.toShortString() + " distSq=" + d + " isBed=" + isBed);
@@ -392,15 +399,15 @@ public final class ScheduleService {
                      : v.getNavigation().getTargetPos().toShortString()));
             }
          }
-         case "waking" -> {
+         case WAKING -> {
             if (v.isSleeping()) v.stopSleeping();
-            if (!"waking".equals(current)) {
-               setActivity(v, "waking");
+            if (current != Activity.WAKING) {
+               setActivity(v, Activity.WAKING);
                long day = level.getGameTime() / 24000L;
                MemoryStore.write(v, "schedule", day, "I woke with the dawn.");
             }
          }
-         default -> setActivity(v, "idle");
+         default -> setActivity(v, Activity.IDLE);
       }
    }
 
@@ -446,25 +453,11 @@ public final class ScheduleService {
       return null;
    }
 
-   private static void setActivity(Villager v, String next) {
+   private static void setActivity(Villager v, Activity next) {
       ACTIVITY.put(v.getUUID(), next);
       if (v instanceof com.yucareux.townfolk.entity.LlmTownsfolk t) {
-         t.setActivity(prettyLabel(next));
+         t.setActivity(next.prettyOverhead());
       }
-   }
-
-   /** Human-friendly label rendered above the villager's head. */
-   private static String prettyLabel(String activity) {
-      return switch (activity) {
-         case "waking"        -> "(waking up)";
-         case "going_to_work" -> "(off to work)";
-         case "at_work"       -> "(at work)";
-         case "going_home"    -> "(heading home)";
-         case "at_home"       -> "(at home)";
-         case "sleeping"      -> "(sleeping)";
-         case "following"     -> "(following)";
-         default              -> "";
-      };
    }
 
    private static String nameOf(Villager v) {
@@ -495,14 +488,14 @@ public final class ScheduleService {
       return "night";
    }
 
-   private static String desiredActivity(LlmVillagerComponent comp, String phase) {
+   private static Activity desiredActivity(LlmVillagerComponent comp, String phase) {
       return switch (phase) {
-         case "dawn"       -> "waking";
-         case "work_hours" -> comp.playerSetJob() ? "going_to_work" : "idle";
-         case "evening"    -> comp.playerSetHome() ? "going_home" : "idle";
-         case "dusk"       -> comp.playerSetHome() ? "going_home" : "idle";
-         case "night"      -> comp.playerSetHome() ? "sleeping" : "idle";
-         default            -> "idle";
+         case "dawn"       -> Activity.WAKING;
+         case "work_hours" -> comp.playerSetJob()  ? Activity.GOING_TO_WORK : Activity.IDLE;
+         case "evening"    -> comp.playerSetHome() ? Activity.GOING_HOME    : Activity.IDLE;
+         case "dusk"       -> comp.playerSetHome() ? Activity.GOING_HOME    : Activity.IDLE;
+         case "night"      -> comp.playerSetHome() ? Activity.SLEEPING      : Activity.IDLE;
+         default            -> Activity.IDLE;
       };
    }
 

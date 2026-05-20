@@ -582,7 +582,7 @@ public final class TownAdminService {
          // rest are idle (which includes "no actionable work" cases).
          if (entry.alive()) {
             if (isSleeping) sleepingCountTally++;
-            else if (activity == null || activity.equals("idle")) idleCountTally++;
+            else if (com.yucareux.townfolk.world.Activity.fromWire(activity).isIdle()) idleCountTally++;
             else workingCountTally++;
          }
          // Per-parcel summaries — one row per owned parcel.

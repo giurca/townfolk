@@ -107,10 +107,11 @@ final class VillagersRenderer {
       g.fill(x, y + VILL_CELL_H, x + VILL_CELL_W, y + VILL_CELL_H + 1, UiTheme.PANEL_BORDER);
 
       int pip;
-      String activity = v.activity();
-      if ("sleeping".equals(activity))      pip = 0xFF6E8FE0;
-      else if ("idle".equals(activity))     pip = UiTheme.FAINT;
-      else                                  pip = UiTheme.OK;
+      com.yucareux.townfolk.world.Activity activity =
+         com.yucareux.townfolk.world.Activity.fromWire(v.activity());
+      if (activity.isSleeping())     pip = 0xFF6E8FE0;
+      else if (activity.isIdle())    pip = UiTheme.FAINT;
+      else                            pip = UiTheme.OK;
       g.fill(x + 3, y + 3, x + 7, y + 7, pip);
 
       String anchor = (v.playerSetHome() && v.playerSetJob()) ? "⌂⚒"
@@ -131,7 +132,7 @@ final class VillagersRenderer {
          x + (VILL_CELL_W - nw) / 2, y + 32,
          v.alive() ? UiTheme.BODY : UiTheme.FAINT, true);
 
-      String act = TownAdminScreen.prettifyActivity(activity);
+      String act = activity.displayLabel();
       String actClip = UiText.truncate(font, act, VILL_CELL_W - 6);
       int aw2 = font.width(actClip);
       g.drawString(font, actClip,
@@ -154,12 +155,12 @@ final class VillagersRenderer {
              && !v.activity().toLowerCase(Locale.ROOT).contains(q)) continue;
          if (!"all".equals(prof) && !v.profession().equals(prof)) continue;
          if (!"all".equals(status)) {
-            boolean sleeping = "sleeping".equals(v.activity());
-            boolean idle = "idle".equals(v.activity());
+            com.yucareux.townfolk.world.Activity a =
+               com.yucareux.townfolk.world.Activity.fromWire(v.activity());
             switch (status) {
-               case "working" -> { if (sleeping || idle) continue; }
-               case "idle"    -> { if (!idle) continue; }
-               case "sleeping"-> { if (!sleeping) continue; }
+               case "working" -> { if (a.isSleeping() || a.isIdle()) continue; }
+               case "idle"    -> { if (!a.isIdle()) continue; }
+               case "sleeping"-> { if (!a.isSleeping()) continue; }
             }
          }
          out.add(v);
