@@ -3,6 +3,8 @@
   "item.townfolk.town_square": "Charter Stone",
   "block.townfolk.trade_post": "Trade Post",
   "item.townfolk.trade_post": "Trade Post",
+  "block.townfolk.tavern_sign": "Tavern Sign",
+  "item.townfolk.tavern_sign": "Tavern Sign",
   "config.jade.plugin_townfolk.townsfolk_info": "Townsfolk Info",
   "item.townfolk.surveyor_stake": "Surveyor's Stake",
   "item.townfolk.building_permit": "Building Permit"

@@ -1,0 +1,17 @@
+{
+  "_comment": "Tavern Sign: 4 spruce planks around a brewing stand. Spruce planks evoke the dark-wood tavern frontage; brewing stand at the heart matches the in-tavern furniture requirement.",
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "PPP",
+    "PBP",
+    "PPP"
+  ],
+  "key": {
+    "P": { "item": "minecraft:spruce_planks" },
+    "B": { "item": "minecraft:brewing_stand" }
+  },
+  "result": {
+    "id": "townfolk:tavern_sign",
+    "count": 1
+  }
+}

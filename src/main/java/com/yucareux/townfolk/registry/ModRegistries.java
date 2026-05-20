@@ -153,6 +153,32 @@ public final class ModRegistries {
          () -> BlockEntityType.Builder.of(TradePostBlockEntity::new, TRADE_POST_BLOCK.get()).build(null)
       );
 
+   /** Tavern Sign — marker block for the {@code TAVERN} building
+    *  template (Stage 11a). Wood-strength block, axe-mineable, no
+    *  occlusion (custom non-cube model). */
+   public static final Supplier<com.yucareux.townfolk.block.TavernSignBlock> TAVERN_SIGN_BLOCK =
+      BLOCKS.register(
+         "tavern_sign",
+         () -> new com.yucareux.townfolk.block.TavernSignBlock(BlockBehaviour.Properties.of()
+            .mapColor(MapColor.WOOD)
+            .strength(1.5F, 3.0F)
+            .sound(SoundType.WOOD)
+            .noOcclusion())
+      );
+
+   public static final Supplier<Item> TAVERN_SIGN_ITEM = ITEMS.register(
+      "tavern_sign",
+      () -> new BlockItem(TAVERN_SIGN_BLOCK.get(), new Item.Properties())
+   );
+
+   public static final Supplier<BlockEntityType<com.yucareux.townfolk.blockentity.TavernSignBlockEntity>>
+      TAVERN_SIGN_BE = BLOCK_ENTITIES.register(
+         "tavern_sign",
+         () -> BlockEntityType.Builder.of(
+            com.yucareux.townfolk.blockentity.TavernSignBlockEntity::new,
+            TAVERN_SIGN_BLOCK.get()).build(null)
+      );
+
    public static void register(IEventBus modEventBus) {
       BLOCKS.register(modEventBus);
       ITEMS.register(modEventBus);
@@ -181,6 +207,7 @@ public final class ModRegistries {
       // auto treatment.
       if (event.getTabKey() == net.minecraft.world.item.CreativeModeTabs.FUNCTIONAL_BLOCKS) {
          event.accept(TRADE_POST_ITEM.get());
+         event.accept(TAVERN_SIGN_ITEM.get());
       }
    }
 

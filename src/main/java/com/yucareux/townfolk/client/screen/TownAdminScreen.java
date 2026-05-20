@@ -1719,11 +1719,13 @@ public final class TownAdminScreen extends Screen {
       int prestige   = this.state.prestige();
       int homes      = this.state.homeCount();
       boolean townHall = this.state.hasTownHall();
+      int taverns    = this.state.tavernCount();
       int popCap     = homes + (townHall ? 4 : 0);
       int popAlive   = this.state.populationAlive();
       String capLine = "Pop: " + popAlive + " / " + popCap
                      + "  ·  Homes: " + homes
-                     + (townHall ? "  ·  ⛨ Town Hall (+4)" : "");
+                     + (townHall ? "  ·  ⛨ Town Hall (+4)" : "")
+                     + (taverns > 0 ? "  ·  Tavern × " + taverns : "");
       String tradeLine = "Trade Posts: " + tradePosts
                        + "  ·  Prestige: " + prestige + " / "
                        + com.yucareux.townfolk.town.TownData.MAX_PRESTIGE;

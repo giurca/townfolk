@@ -71,6 +71,10 @@ public record TownStateUpdatePayload(
     *  Stone enclosed with door + banner). Adds 4 to the population
     *  cap when true. */
    boolean hasTownHall,
+   /** Active Tavern buildings (Stage 11a). Unlocks the TAVERN leisure
+    *  option for villagers in coverage. No mechanical effect on the
+    *  population cap or other stats — flavor + LLM context only. */
+   int tavernCount,
    int idleCount,
    int workingCount,
    int sleepingCount,
@@ -406,6 +410,7 @@ public record TownStateUpdatePayload(
             buf.writeVarInt(p.prestige);
             buf.writeVarInt(p.homeCount);
             buf.writeBoolean(p.hasTownHall);
+            buf.writeVarInt(p.tavernCount);
             buf.writeVarInt(p.idleCount);
             buf.writeVarInt(p.workingCount);
             buf.writeVarInt(p.sleepingCount);
@@ -455,6 +460,7 @@ public record TownStateUpdatePayload(
             int prestige = buf.readVarInt();
             int homeCount = buf.readVarInt();
             boolean hasTownHall = buf.readBoolean();
+            int tavernCount = buf.readVarInt();
             int idle = buf.readVarInt();
             int work = buf.readVarInt();
             int slp  = buf.readVarInt();
@@ -464,7 +470,7 @@ public record TownStateUpdatePayload(
                villagers, townFacts, log, storage,
                agg, resLocs, targets, parcels, tradeOffers, treasury,
                popA, popT, tradePosts, prestige,
-               homeCount, hasTownHall,
+               homeCount, hasTownHall, tavernCount,
                idle, work, slp, bToday, dToday);
          }
       );

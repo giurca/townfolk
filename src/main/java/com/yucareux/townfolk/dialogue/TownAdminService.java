@@ -748,6 +748,7 @@ public final class TownAdminService {
          data.prestige(),
          com.yucareux.townfolk.building.PopulationCap.homeCount(level),
          com.yucareux.townfolk.building.PopulationCap.hasTownHall(level),
+         com.yucareux.townfolk.building.PopulationCap.tavernCount(level),
          idleCountTally,
          workingCountTally,
          sleepingCountTally,

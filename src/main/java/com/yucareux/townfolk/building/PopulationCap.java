@@ -42,6 +42,13 @@ public final class PopulationCap {
       return BuildingRegistry.countActiveOfType(level, BuildingTemplates.TOWN_HALL) > 0;
    }
 
+   /** Active tavern building count in the level. Used by the leisure
+    *  system (Stage 11) to gate the {@code tavern} evening-activity
+    *  option. No population-cap effect. */
+   public static int tavernCount(ServerLevel level) {
+      return BuildingRegistry.countActiveOfType(level, BuildingTemplates.TAVERN);
+   }
+
    /** Effective population cap for the level. */
    public static int effectiveCap(ServerLevel level) {
       int homes = homeCount(level);

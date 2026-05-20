@@ -25,6 +25,7 @@ public final class BuildingTemplates {
 
    public static final String HOME      = "home";
    public static final String TOWN_HALL = "town_hall";
+   public static final String TAVERN    = "tavern";
 
    private static volatile List<BuildingTemplate> ALL;
 
@@ -105,6 +106,29 @@ public final class BuildingTemplates {
          true,             // requires door
          16, 2,            // 16 m² floor, 2 blocks of interior height (same as Home)
          1024, 12
+      ));
+
+      // ── Tavern ──
+      // Marker = Tavern Sign. Recognised when placed inside a room with
+      // a door, 20 m² of floor, 2 blocks of headroom, plus the two
+      // canonical tavern fixtures: a barrel (the keg) and a brewing
+      // stand (the tap / mixology setup). Loose enough that the player
+      // has visual freedom; tight enough that "the bartender's bar"
+      // reads at a glance.
+      //
+      // The tavern unlocks the LEISURE = TAVERN option in Stage 11b's
+      // evening-activity flow. No other mechanical effect yet.
+      Block tavernSign = com.yucareux.townfolk.registry.ModRegistries.TAVERN_SIGN_BLOCK.get();
+      java.util.LinkedHashMap<Block, Integer> tavernReq = new java.util.LinkedHashMap<>();
+      tavernReq.put(Blocks.BARREL, 1);
+      tavernReq.put(Blocks.BREWING_STAND, 1);
+      out.add(new BuildingTemplate(
+         TAVERN,
+         List.of(tavernSign),
+         tavernReq,
+         true,             // requires door
+         20, 2,            // 20 m² floor, 2 blocks tall
+         2048, 16          // generous caps — taverns can be larger
       ));
 
       return List.copyOf(out);

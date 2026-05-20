@@ -1,0 +1,7 @@
+{
+  "_comment": "Add the Tavern Sign to the axe-mineable tag so the wood-themed marker is broken with the right tool. No tool-tier requirement (no needs_X_tool tag) — wooden axe is enough.",
+  "replace": false,
+  "values": [
+    "townfolk:tavern_sign"
+  ]
+}
