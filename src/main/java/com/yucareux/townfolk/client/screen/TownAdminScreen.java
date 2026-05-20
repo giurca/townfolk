@@ -33,20 +33,24 @@ import org.lwjgl.glfw.GLFW;
  */
 public final class TownAdminScreen extends Screen {
 
-   private static final int PANEL_BG       = 0xEE1A130E;
-   private static final int PANEL_BORDER   = 0xFF8C6E3D;
-   private static final int HEADER_BG      = 0xFF2C1F14;
-   private static final int TAB_ACTIVE_BG  = 0xFF3D2D1E;
-   private static final int ROW_BG         = 0xFF22180F;
-   private static final int ROW_BG_HOVER   = 0xFF3D2D1E;
-   private static final int FG_PRIMARY     = 0xFFEDE0C2;
-   private static final int FG_ACCENT      = 0xFFFFD27A;
-   private static final int FG_DIM         = 0xFFB89B70;
-   private static final int FG_FAINT       = 0xFF7A6849;
-   private static final int FG_ERROR       = 0xFFC76A50;
-   private static final int FG_RESOLVED    = 0xFF7AB46A;
+   // ── Theme aliases — single source of truth is UiTheme. ──
+   // These per-screen names are kept so the rest of this file's call
+   // sites need no churn; their values now flow through UiTheme so a
+   // future palette tweak lands in one place.
+   private static final int PANEL_BG       = UiTheme.PANEL_BG;
+   private static final int PANEL_BORDER   = UiTheme.PANEL_BORDER;
+   private static final int HEADER_BG      = UiTheme.HEADER_BG;
+   private static final int TAB_ACTIVE_BG  = UiTheme.TAB_ACTIVE;
+   private static final int ROW_BG         = UiTheme.ROW_BG;
+   private static final int ROW_BG_HOVER   = UiTheme.ROW_BG_HOVER;
+   private static final int FG_PRIMARY     = UiTheme.BODY;
+   private static final int FG_ACCENT      = UiTheme.HEADING;
+   private static final int FG_DIM         = UiTheme.MUTED;
+   private static final int FG_FAINT       = UiTheme.FAINT;
+   private static final int FG_ERROR       = UiTheme.ERROR;
+   private static final int FG_RESOLVED    = UiTheme.RESOLVED;
 
-   private static final int PADDING = 14;
+   private static final int PADDING = UiTheme.PADDING;
 
    /** Render the whole admin panel at this scale relative to vanilla GUI
     *  units. 0.66 effectively gives us ~1.5× more logical room without
@@ -2159,9 +2163,11 @@ public final class TownAdminScreen extends Screen {
    }
 
    /** Gold-ish hue for treasury cell backgrounds — distinguishes
-    *  claimable payouts from regular stockpile at a glance. */
-   private static final int TREASURY_CELL_BG     = 0x40FFC847;
-   private static final int TREASURY_CELL_BORDER = 0xFFFFC847;
+    *  claimable payouts from regular stockpile at a glance. Aliased
+    *  to UiTheme so the trade-popup chip palette + treasury cells
+    *  stay in lockstep. */
+   private static final int TREASURY_CELL_BG     = UiTheme.TREASURY_CELL_BG;
+   private static final int TREASURY_CELL_BORDER = UiTheme.TREASURY_CELL_BORDER;
 
    /** One cell of the resource grid. Renders BOTH normal stockpile
     *  entries and town-treasury entries (claimable payouts) — the
