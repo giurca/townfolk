@@ -83,6 +83,26 @@ public final class LeisureService {
     *  arrives. Cleared on day rollover. */
    private static final Map<UUID, Long> LLM_REQUESTED_DAY = new ConcurrentHashMap<>();
 
+   /** Gametime at which a TAVERN patron next picks a new spot near
+    *  the bar. Re-rolled every {@link #TAVERN_SHUFFLE_TICKS}. */
+   private static final Map<UUID, Long> TAVERN_NEXT_SHUFFLE = new ConcurrentHashMap<>();
+
+   /** Patrons shuffle to a new spot every this many ticks (~30 s).
+    *  Loose enough that they don't look fidgety; tight enough that
+    *  the tavern reads as "milling about" rather than statuary. */
+   private static final long TAVERN_SHUFFLE_TICKS = 600L;
+
+   /** A "patron spot" must be within this many manhattan blocks of
+    *  a bar fixture (barrel or brewing stand). Keeps patrons clustered
+    *  around the bar instead of pacing the back wall. */
+   private static final int TAVERN_PATRON_RADIUS = 4;
+
+   /** Head-tracking cadence — every this many ticks the patron will
+    *  re-aim their look at the nearest other patron. Vanilla's
+    *  LookControl smoothly interpolates so this gives a natural
+    *  drift rather than a snap. */
+   private static final long TAVERN_LOOK_INTERVAL_TICKS = 40L;
+
    private LeisureService() {}
 
    /** True iff this villager has a leisure plan in flight for the
@@ -104,6 +124,7 @@ public final class LeisureService {
       CHOICES.remove(villager);
       NEXT_WALK_REROLL.remove(villager);
       LLM_REQUESTED_DAY.remove(villager);
+      TAVERN_NEXT_SHUFFLE.remove(villager);
    }
 
    @SubscribeEvent
@@ -301,34 +322,134 @@ public final class LeisureService {
                                       List<RecognizedBuilding> taverns,
                                       long now) {
       switch (choice.activity()) {
-         case TAVERN -> driveTavern(level, v, choice, taverns);
+         case TAVERN -> driveTavern(level, v, choice, taverns, now);
          case WALK   -> driveWalk(level, v, choice, now);
          case STAY_HOME -> driveStayHome(level, v);
       }
    }
 
+   /** TAVERN executor — Stage 11d adds "physical presence" on top of
+    *  the original walk-to-centroid behavior:
+    *  <ol>
+    *    <li>Patron shuffles to a new spot near the bar every
+    *        {@link #TAVERN_SHUFFLE_TICKS} ticks.
+    *    <li>Once at their spot, head-tracks the nearest other patron
+    *        every {@link #TAVERN_LOOK_INTERVAL_TICKS} ticks so a group
+    *        reads as mingling, not statuary.
+    *  </ol> */
    private static void driveTavern(ServerLevel level,
                                     Villager v,
                                     LeisureChoice choice,
-                                    List<RecognizedBuilding> taverns) {
-      BlockPos target = choice.targetPos();
-      if (target == null && !taverns.isEmpty()) {
-         target = tavernInteriorCentre(taverns.get(0));
-         CHOICES.put(v.getUUID(), choice.withTarget(target));
-      }
-      if (target == null) {
+                                    List<RecognizedBuilding> taverns,
+                                    long now) {
+      if (taverns.isEmpty()) {
          // Tavern recognition went away mid-evening — fall back to home.
          CHOICES.put(v.getUUID(),
             new LeisureChoice(choice.day(), LeisureActivity.STAY_HOME,
                "The tavern's no longer recognised — heading home.", null));
          return;
       }
-      // If we're already inside the tavern, idle. Otherwise keep walking.
-      if (v.blockPosition().closerThan(target, 3.0)) {
-         // Stand around — clear any nav so the villager doesn't pace.
+      RecognizedBuilding tavern = taverns.get(0);
+
+      // ── 1. Pick a target spot if we have none, or if shuffle is due. ──
+      BlockPos target = choice.targetPos();
+      Long nextShuffle = TAVERN_NEXT_SHUFFLE.get(v.getUUID());
+      boolean shuffleDue = nextShuffle != null && now >= nextShuffle;
+      boolean atTarget = target != null && v.blockPosition().closerThan(target, 1.5);
+      if (target == null || (atTarget && shuffleDue)) {
+         BlockPos spot = pickPatronSpot(level, tavern);
+         if (spot != null) {
+            target = spot;
+            CHOICES.put(v.getUUID(), choice.withTarget(target));
+            TAVERN_NEXT_SHUFFLE.put(v.getUUID(), now + TAVERN_SHUFFLE_TICKS);
+            atTarget = v.blockPosition().closerThan(target, 1.5);
+            // Cancel any in-flight nav so the new target is picked up cleanly.
+            if (v.getNavigation().isInProgress()) v.getNavigation().stop();
+         }
+      }
+      if (target == null) {
+         // Couldn't pick a spot (interior empty?) — stop nav and stand still.
          if (v.getNavigation().isInProgress()) v.getNavigation().stop();
+         return;
+      }
+
+      // ── 2. Move toward target, or idle once we've arrived. ──
+      if (atTarget) {
+         if (v.getNavigation().isInProgress()) v.getNavigation().stop();
+         // ── 3. Head-track the nearest other patron at a low cadence. ──
+         if (now % TAVERN_LOOK_INTERVAL_TICKS == 0L) {
+            headTrackNearestPatron(level, v);
+         }
       } else if (!v.getNavigation().isInProgress()) {
          NavCall.moveTo(v, target, LEISURE_SPEED, "Leisure.tavern");
+      }
+   }
+
+   /** Pick a random air block in the tavern's interior that's within
+    *  {@link #TAVERN_PATRON_RADIUS} manhattan blocks of a bar fixture
+    *  (barrel or brewing stand). Falls back to the interior centroid
+    *  if no candidates exist (interior set empty / no fixtures left). */
+   private static BlockPos pickPatronSpot(ServerLevel level, RecognizedBuilding tavern) {
+      // Find bar fixture positions among the boundary set (barrels and
+      // brewing stands aren't passable so the recogniser sorted them
+      // into boundary, not interior).
+      java.util.List<BlockPos> bars = new java.util.ArrayList<>();
+      for (BlockPos p : tavern.boundary()) {
+         net.minecraft.world.level.block.Block b = level.getBlockState(p).getBlock();
+         if (b == net.minecraft.world.level.block.Blocks.BARREL
+             || b == net.minecraft.world.level.block.Blocks.BREWING_STAND) {
+            bars.add(p);
+         }
+      }
+      if (bars.isEmpty() || tavern.interior() == null || tavern.interior().isEmpty()) {
+         return tavernInteriorCentre(tavern);
+      }
+      // Candidate interior positions: those within radius of at least one bar.
+      java.util.List<BlockPos> candidates = new java.util.ArrayList<>();
+      for (BlockPos p : tavern.interior()) {
+         for (BlockPos bar : bars) {
+            if (manhattan(p, bar) <= TAVERN_PATRON_RADIUS) {
+               candidates.add(p);
+               break;
+            }
+         }
+      }
+      if (candidates.isEmpty()) return tavernInteriorCentre(tavern);
+      return candidates.get(level.getRandom().nextInt(candidates.size()));
+   }
+
+   private static int manhattan(BlockPos a, BlockPos b) {
+      return Math.abs(a.getX() - b.getX())
+           + Math.abs(a.getY() - b.getY())
+           + Math.abs(a.getZ() - b.getZ());
+   }
+
+   /** Aim the villager's head at the nearest other patron in the same
+    *  tavern. No-op if there's nobody else nearby. LookControl smoothly
+    *  interpolates over multiple ticks; we only need to seed the target
+    *  at our cadence. */
+   private static void headTrackNearestPatron(ServerLevel level, Villager v) {
+      net.minecraft.world.entity.npc.Villager nearest = null;
+      double bestDistSq = Double.MAX_VALUE;
+      long today = level.getGameTime() / 24000L;
+      for (var entry : CHOICES.entrySet()) {
+         if (entry.getKey().equals(v.getUUID())) continue;
+         LeisureChoice other = entry.getValue();
+         if (other == null
+             || other.day() != today
+             || other.activity() != LeisureActivity.TAVERN) continue;
+         if (!(level.getEntity(entry.getKey())
+               instanceof net.minecraft.world.entity.npc.Villager ov)) continue;
+         double d = v.distanceToSqr(ov);
+         if (d < bestDistSq) {
+            bestDistSq = d;
+            nearest = ov;
+         }
+      }
+      // Only look at someone within ~6 blocks — beyond that the patron
+      // is probably across the room and a head-turn looks awkward.
+      if (nearest != null && bestDistSq <= 36.0) {
+         v.getLookControl().setLookAt(nearest, 30.0F, 30.0F);
       }
    }
 
