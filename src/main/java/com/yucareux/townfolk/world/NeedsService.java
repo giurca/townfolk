@@ -407,27 +407,15 @@ public final class NeedsService {
          + " — same trade, new spot.";
    }
 
-   /**
-    * Vanilla profession ↔ workstation block mapping. Returns null for blocks
-    * that aren't a recognised workstation. Tracks the standard 13 trades.
-    */
+   /** Vanilla profession ↔ workstation block mapping. Defers to the
+    *  {@link com.yucareux.townfolk.villager.ProfessionTraits} registry
+    *  — the single source of truth for per-profession metadata.
+    *  Returns null for blocks that aren't a recognised workstation. */
    public static net.minecraft.world.entity.npc.VillagerProfession professionForBlock(
          net.minecraft.world.level.block.Block b) {
-      net.minecraft.world.level.block.Blocks B = null;   // alias for readability not needed
-      if (b == net.minecraft.world.level.block.Blocks.COMPOSTER) return net.minecraft.world.entity.npc.VillagerProfession.FARMER;
-      if (b == net.minecraft.world.level.block.Blocks.BARREL) return net.minecraft.world.entity.npc.VillagerProfession.FISHERMAN;
-      if (b == net.minecraft.world.level.block.Blocks.LECTERN) return net.minecraft.world.entity.npc.VillagerProfession.LIBRARIAN;
-      if (b == net.minecraft.world.level.block.Blocks.SMOKER) return net.minecraft.world.entity.npc.VillagerProfession.BUTCHER;
-      if (b == net.minecraft.world.level.block.Blocks.BLAST_FURNACE) return net.minecraft.world.entity.npc.VillagerProfession.ARMORER;
-      if (b == net.minecraft.world.level.block.Blocks.CARTOGRAPHY_TABLE) return net.minecraft.world.entity.npc.VillagerProfession.CARTOGRAPHER;
-      if (b == net.minecraft.world.level.block.Blocks.BREWING_STAND) return net.minecraft.world.entity.npc.VillagerProfession.CLERIC;
-      if (b == net.minecraft.world.level.block.Blocks.FLETCHING_TABLE) return net.minecraft.world.entity.npc.VillagerProfession.FLETCHER;
-      if (b == net.minecraft.world.level.block.Blocks.CAULDRON) return net.minecraft.world.entity.npc.VillagerProfession.LEATHERWORKER;
-      if (b == net.minecraft.world.level.block.Blocks.STONECUTTER) return net.minecraft.world.entity.npc.VillagerProfession.MASON;
-      if (b == net.minecraft.world.level.block.Blocks.LOOM) return net.minecraft.world.entity.npc.VillagerProfession.SHEPHERD;
-      if (b == net.minecraft.world.level.block.Blocks.SMITHING_TABLE) return net.minecraft.world.entity.npc.VillagerProfession.TOOLSMITH;
-      if (b == net.minecraft.world.level.block.Blocks.GRINDSTONE) return net.minecraft.world.entity.npc.VillagerProfession.WEAPONSMITH;
-      return null;
+      return com.yucareux.townfolk.villager.ProfessionTraits.findByWorkstation(b)
+         .map(com.yucareux.townfolk.villager.ProfessionTraits::vanilla)
+         .orElse(null);
    }
 
    private NeedsService() {}

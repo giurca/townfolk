@@ -3010,30 +3010,15 @@ public final class TownAdminScreen extends Screen {
       return null;
    }
 
-   /** Map a profession name to a tile icon. Lazily caches each stack
-    *  so renderItem isn't paying a registry lookup every frame. */
+   /** Map a profession name to a tile icon. Defers to the
+    *  {@link com.yucareux.townfolk.villager.ProfessionTraits}
+    *  registry — the single source of truth for per-profession
+    *  metadata. Stack form cached per profession so renderItem
+    *  isn't paying a registry lookup every frame. */
    private net.minecraft.world.item.ItemStack iconForProfession(String prof) {
       String key = prof == null ? "" : prof.toLowerCase(Locale.ROOT);
-      return this.villagerIconByProfession.computeIfAbsent(key, k -> {
-         net.minecraft.world.item.Item item = switch (k) {
-            case "farmer"        -> net.minecraft.world.item.Items.WHEAT;
-            case "shepherd"      -> net.minecraft.world.item.Items.SHEARS;
-            case "butcher"       -> net.minecraft.world.item.Items.COOKED_BEEF;
-            case "mason"         -> net.minecraft.world.item.Items.SMOOTH_STONE;
-            case "librarian"     -> net.minecraft.world.item.Items.ENCHANTED_BOOK;
-            case "cartographer"  -> net.minecraft.world.item.Items.FILLED_MAP;
-            case "fisherman"     -> net.minecraft.world.item.Items.FISHING_ROD;
-            case "fletcher"      -> net.minecraft.world.item.Items.BOW;
-            case "toolsmith"     -> net.minecraft.world.item.Items.IRON_PICKAXE;
-            case "weaponsmith"   -> net.minecraft.world.item.Items.IRON_SWORD;
-            case "armorer"       -> net.minecraft.world.item.Items.IRON_CHESTPLATE;
-            case "leatherworker" -> net.minecraft.world.item.Items.LEATHER;
-            case "cleric"        -> net.minecraft.world.item.Items.BREWING_STAND;
-            case "nitwit"        -> net.minecraft.world.item.Items.POPPY;
-            default               -> net.minecraft.world.item.Items.VILLAGER_SPAWN_EGG;
-         };
-         return new net.minecraft.world.item.ItemStack(item);
-      });
+      return this.villagerIconByProfession.computeIfAbsent(key, k ->
+         com.yucareux.townfolk.villager.ProfessionTraits.find(k).tileIconStack());
    }
 
    /** Hit-test the villager grid. Mirrors the layout used by
