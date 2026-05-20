@@ -1057,39 +1057,41 @@ public final class TownAdminScreen extends Screen {
    }
 
    private void initSpawnFormWidgets(int paneL, int paneR, int top, int bottom) {
-      int innerL = paneL + PADDING;
-      int innerR = paneR - PADDING;
-      int width = innerR - innerL;
+      // Spawn form lives inside a centred modal card. Compute the
+      // card rect (matches renderSpawnForm) and place inputs inside.
+      int[] card = spawnFormCardRect(paneL, paneR, top, bottom);
+      int cardL = card[0], cardT = card[1], cardW = card[2], cardH = card[3];
+      int innerL = cardL + 12;
+      int innerR = cardL + cardW - 12;
+      int innerW = innerR - innerL;
 
-      // Name — leave blank to have the LLM pick a fitting Alpine name.
-      this.spawnNameBox = new EditBox(this.font, innerL, top + 22, width, 20,
+      // Name input under the title.
+      this.spawnNameBox = new EditBox(this.font, innerL, cardT + 36, innerW, 20,
          Component.literal("name (blank = LLM picks)"));
       this.spawnNameBox.setMaxLength(40);
       addRenderableWidget(this.spawnNameBox);
 
-      // Persona seed — drives the backstory. Role field is gone; villagers
-      // build their own role from the seed + their in-world actions.
-      this.spawnSeedBox = new EditBox(this.font, innerL, top + 64, width, 80,
+      // Persona seed input below.
+      this.spawnSeedBox = new EditBox(this.font, innerL, cardT + 80, innerW, 80,
          Component.literal("persona seed (optional — 1-3 sentences)"));
       this.spawnSeedBox.setMaxLength(500);
       addRenderableWidget(this.spawnSeedBox);
 
-      addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> {
-         this.mode = Mode.NORMAL;
-         rebuildAdminWidgets();
-      }).bounds(innerL, bottom - 22, 80, 20).build());
-
-      addRenderableWidget(Button.builder(Component.literal("Spawn"), b -> {
-         String name = this.spawnNameBox.getValue().trim();
-         String seed = this.spawnSeedBox.getValue().trim();
-         // Empty name is fine — server asks the LLM for one.
-         PacketDistributor.sendToServer(AdminActionPayload.spawn(townPos(), name, "", seed));
-         this.mode = Mode.NORMAL;
-         this.tab = Tab.VILLAGERS;
-         rebuildAdminWidgets();
-      }).bounds(innerR - 80, bottom - 22, 80, 20).build());
-
+      // Custom-drawn Cancel + Spawn chips — handled in mouseClicked.
+      // No vanilla Button widgets here, matching the modal language of
+      // BuildingPermit, ParcelTypePopup, and the new villager-detail
+      // modal.
       this.setInitialFocus(this.spawnNameBox);
+   }
+
+   /** Geometry of the spawn-form modal card. Drawn + hit-tested
+    *  consistently from one source of truth. */
+   private int[] spawnFormCardRect(int paneL, int paneR, int top, int bottom) {
+      int cardW = Math.min(420, paneR - paneL - 60);
+      int cardH = 220;
+      int cardL = (paneL + paneR - cardW) / 2;
+      int cardT = (top + bottom - cardH) / 2;
+      return new int[]{cardL, cardT, cardW, cardH};
    }
 
    /** Reserved Y bands inside VILLAGER_DETAIL mode. The header always
@@ -1540,6 +1542,34 @@ public final class TownAdminScreen extends Screen {
          }
       }
 
+      // ── Spawn form chip hit-test (Cancel / Spawn). ──
+      if (this.mode == Mode.SPAWN_FORM) {
+         int paneR = paneL + panelWidth();
+         int top = paneT + 22 + 16;
+         int bottom = paneT + panelHeight() - PADDING;
+         int[] card = spawnFormCardRect(paneL, paneR, top, bottom);
+         int cardL = card[0], cardT = card[1], cardW = card[2], cardH = card[3];
+         int chipY = cardT + cardH - 26;
+         int cancelX = cardL + 12;
+         int spawnX  = cardL + cardW - 12 - 96;
+         if (mouseY >= chipY && mouseY < chipY + 18) {
+            if (mouseX >= cancelX && mouseX < cancelX + 76) {
+               this.mode = Mode.NORMAL;
+               rebuildAdminWidgets();
+               return true;
+            }
+            if (mouseX >= spawnX && mouseX < spawnX + 96) {
+               String name = this.spawnNameBox == null ? "" : this.spawnNameBox.getValue().trim();
+               String seed = this.spawnSeedBox == null ? "" : this.spawnSeedBox.getValue().trim();
+               PacketDistributor.sendToServer(AdminActionPayload.spawn(townPos(), name, "", seed));
+               this.mode = Mode.NORMAL;
+               this.tab = Tab.VILLAGERS;
+               rebuildAdminWidgets();
+               return true;
+            }
+         }
+      }
+
       // ── Villager detail: tab-strip click switches tabs. ──
       if (this.mode == Mode.VILLAGER_DETAIL) {
          DetailTab clickedTab = hitTestDetailTabs(mouseX, mouseY);
@@ -1761,7 +1791,7 @@ public final class TownAdminScreen extends Screen {
                case LOG -> renderLogTab(graphics, l, r, contentTop, contentBottom);
             }
          }
-         case SPAWN_FORM -> renderSpawnForm(graphics, l, r, t + headerH + 16, b - PADDING);
+         case SPAWN_FORM -> renderSpawnForm(graphics, l, r, t + headerH + 16, b - PADDING, mouseX, mouseY);
          case VILLAGER_DETAIL -> renderVillagerDetail(graphics, l, r, t + headerH + 16, b - PADDING, mouseX, mouseY);
          case MEMORIES -> renderMemories(graphics, l, r, t + headerH + 16, b - PADDING);
          case BELIEFS_FULL -> renderBeliefsFull(graphics, l, r, t + headerH + 16, b - PADDING);
@@ -3059,13 +3089,54 @@ public final class TownAdminScreen extends Screen {
       };
    }
 
-   private void renderSpawnForm(GuiGraphics graphics, int paneL, int paneR, int top, int bottom) {
-      int innerL = paneL + PADDING;
-      graphics.drawString(this.font, "Spawn a new villager", innerL, top, FG_ACCENT, true);
-      graphics.drawString(this.font, "Name (leave blank for the LLM to choose)",
-         innerL, top + 14, FG_DIM, true);
-      graphics.drawString(this.font, "Persona seed — informs the auto-generated backstory",
-         innerL, top + 56, FG_DIM, true);
+   private void renderSpawnForm(GuiGraphics g, int paneL, int paneR, int top, int bottom,
+                                 int mouseX, int mouseY) {
+      // Modal card + dim backdrop so the form reads as a focused
+      // task, not bare text on the admin panel.
+      g.fill(paneL, top, paneR, bottom, 0x90000000);
+      int[] card = spawnFormCardRect(paneL, paneR, top, bottom);
+      int cardL = card[0], cardT = card[1], cardW = card[2], cardH = card[3];
+      g.fill(cardL, cardT, cardL + cardW, cardT + cardH, PANEL_BG);
+      g.fill(cardL - 1, cardT - 1, cardL + cardW + 1, cardT, PANEL_BORDER);
+      g.fill(cardL - 1, cardT + cardH, cardL + cardW + 1, cardT + cardH + 1, PANEL_BORDER);
+      g.fill(cardL - 1, cardT, cardL, cardT + cardH, PANEL_BORDER);
+      g.fill(cardL + cardW, cardT, cardL + cardW + 1, cardT + cardH, PANEL_BORDER);
+
+      int textL = cardL + 12;
+      // Title + subtitle.
+      g.drawString(this.font,
+         Component.literal("Spawn a new villager").withStyle(ChatFormatting.GOLD),
+         textL, cardT + 10, FG_ACCENT, true);
+      g.drawString(this.font, "The LLM will write the rest of who they are.",
+         textL, cardT + 22, FG_FAINT, true);
+
+      // Field labels.
+      g.drawString(this.font, "Name (leave blank for the LLM to choose)",
+         textL, cardT + 60 + 4, FG_DIM, true);          // just below the name EditBox
+      g.drawString(this.font, "Persona seed — informs the auto-generated backstory",
+         textL, cardT + 162, FG_DIM, true);              // below the seed EditBox
+
+      // Footer chip row — Cancel (neutral) on the left, Spawn (primary) on the right.
+      int chipY = cardT + cardH - 26;
+      int cancelX = cardL + 12;
+      int spawnX  = cardL + cardW - 12 - 96;
+      drawSpawnChip(g, cancelX, chipY, 76, 18, "Cancel", false, mouseX, mouseY);
+      drawSpawnChip(g, spawnX,  chipY, 96, 18, "+ Spawn",  true,  mouseX, mouseY);
+   }
+
+   /** Chip used by the spawn modal — primary green or neutral grey. */
+   private void drawSpawnChip(GuiGraphics g, int x, int y, int w, int h,
+                               String label, boolean primary, int mx, int my) {
+      boolean hovered = mx >= x && mx < x + w && my >= y && my < y + h;
+      int bg = primary
+         ? (hovered ? 0xFF4D7330 : 0xFF3C5A22)
+         : (hovered ? 0xFF382820 : 0xFF2A2018);
+      int border = primary ? 0xFF6FA445 : 0xFFB89B70;
+      int fg     = primary ? 0xFFE8FFD2 : 0xFFEDE0C2;
+      g.fill(x, y, x + w, y + h, bg);
+      g.fill(x, y + h, x + w, y + h + 1, border);
+      int lw = this.font.width(label);
+      g.drawString(this.font, label, x + (w - lw) / 2, y + 5, fg, true);
    }
 
    private void renderVillagerDetail(GuiGraphics graphics, int paneL, int paneR, int top, int bottom,

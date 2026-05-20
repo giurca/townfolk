@@ -4,7 +4,6 @@ import com.yucareux.townfolk.town.CropPlan;
 import com.yucareux.townfolk.world.inventory.CropPlanMenu;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -84,33 +83,24 @@ public final class CropPlanScreen extends AbstractContainerScreen<CropPlanMenu> 
       this.inventoryLabelY = INV_ORIGIN_Y - 12;
    }
 
+   // ── Chip geometry constants. Match the trade-popup modal language
+   //    so the screen reads as part of the same UI family. ──
+   private static final int CHIP_NUDGE_W = 16;
+   private static final int CHIP_NUDGE_H = 18;
+   private static final int CHIP_SAVE_W  = 48;
+   private static final int CHIP_SAVE_H  = 18;
+   private static final int CHIP_NEUTRAL_BG     = 0xFF2A2018;
+   private static final int CHIP_NEUTRAL_BORDER = 0xFFB89B70;
+   private static final int CHIP_NEUTRAL_FG     = 0xFFEDE0C2;
+   private static final int CHIP_PRIMARY_BG     = 0xFF3C5A22;
+   private static final int CHIP_PRIMARY_BORDER = 0xFF6FA445;
+   private static final int CHIP_PRIMARY_FG     = 0xFFE8FFD2;
+
    @Override
    protected void init() {
       super.init();
-      // − [weight] + buttons live inside each card, bottom-left strip.
-      for (int i = 0; i < CropPlan.MAX_ENTRIES; i++) {
-         final int row = i;
-         int col = i % GRID_COLS;
-         int rowIdx = i / GRID_COLS;
-         int cardX = this.leftPos + GRID_ORIGIN_X + col * (CARD_W + CARD_GAP);
-         int cardY = this.topPos + GRID_ORIGIN_Y + rowIdx * (CARD_H + CARD_GAP);
-         int btnY = cardY + CARD_H - 22;
-         addRenderableWidget(Button.builder(Component.literal("−"),
-               b -> bumpWeight(row, false))
-            .bounds(cardX + 6, btnY, 16, 18).build());
-         addRenderableWidget(Button.builder(Component.literal("+"),
-               b -> bumpWeight(row, true))
-            .bounds(cardX + CARD_W - 6 - 16, btnY, 16, 18).build());
-      }
-
-      // Save button (Esc / E still commit via removed; this gives an
-      // explicit click with chat-feedback path).
-      int saveY = this.topPos + this.imageHeight - 22;
-      addRenderableWidget(Button.builder(Component.literal("Save"), b -> {
-         if (this.minecraft != null && this.minecraft.player != null) {
-            this.minecraft.player.closeContainer();
-         }
-      }).bounds(this.leftPos + this.imageWidth - 56, saveY, 48, 18).build());
+      // No vanilla Button widgets — − / + / Save chips are custom-drawn
+      // in renderBg/renderLabels and hit-tested in mouseClicked.
    }
 
    private void bumpWeight(int row, boolean up) {
@@ -207,7 +197,7 @@ public final class CropPlanScreen extends AbstractContainerScreen<CropPlanMenu> 
                w > 0 ? FG_DIM : FG_FAINT, true);
          }
 
-         // Big "×N" centered between the buttons at the bottom strip.
+         // Big "×N" centered between the chips at the bottom strip.
          int w = this.menu.weight(i);
          String wText = "×" + w;
          int wTextW = this.font.width(wText);
@@ -215,6 +205,17 @@ public final class CropPlanScreen extends AbstractContainerScreen<CropPlanMenu> 
          g.drawString(this.font, wText,
             cardX + (CARD_W - wTextW) / 2, btnY + 5,
             stack.isEmpty() ? FG_FAINT : FG_ACCENT, true);
+
+         // − / + chips. Custom-drawn (no vanilla Button chrome).
+         // renderLabels is matrix-translated by leftPos/topPos, so we
+         // draw in LOCAL coords. mouseX/mouseY are window-space, so
+         // subtract the offset for hover hit-test.
+         int minusX = cardX + 6;
+         int plusX  = cardX + CARD_W - 6 - CHIP_NUDGE_W;
+         int localMx = mouseX - this.leftPos;
+         int localMy = mouseY - this.topPos;
+         drawNudgeChip(g, minusX, btnY, "−", localMx, localMy);
+         drawNudgeChip(g, plusX, btnY, "+", localMx, localMy);
       }
 
       // Inventory label.
@@ -222,14 +223,94 @@ public final class CropPlanScreen extends AbstractContainerScreen<CropPlanMenu> 
          Component.literal("Your inventory").withStyle(ChatFormatting.GRAY),
          8, this.inventoryLabelY, FG_DIM, true);
 
-      // Preview line in the footer band, left of the Save button.
+      // Preview line in the footer band, left of the Save chip.
       int previewY = this.imageHeight - 16;
       String preview = buildPreview();
-      int maxPreviewW = this.imageWidth - 56 - 8 - 8;
+      int maxPreviewW = this.imageWidth - CHIP_SAVE_W - 8 - 8;
       if (this.font.width(preview) > maxPreviewW) {
          preview = this.font.plainSubstrByWidth(preview, maxPreviewW - 4) + "…";
       }
       g.drawString(this.font, preview, 8, previewY, FG_FAINT, true);
+
+      // Save chip — bottom-right, primary-green to draw the eye.
+      int saveX = this.imageWidth - CHIP_SAVE_W - 8;
+      int saveY = this.imageHeight - CHIP_SAVE_H - 4;
+      int localMx = mouseX - this.leftPos;
+      int localMy = mouseY - this.topPos;
+      drawPrimaryChip(g, saveX, saveY, "Save", localMx, localMy);
+   }
+
+   /** Custom-drawn − / + nudge chip (16×18). Matches the trade-popup
+    *  neutral-chip language; coordinates are LOCAL (renderLabels is
+    *  matrix-translated by leftPos/topPos). */
+   private void drawNudgeChip(GuiGraphics g, int x, int y, String label, int mxLocal, int myLocal) {
+      boolean hovered = mxLocal >= x && mxLocal < x + CHIP_NUDGE_W
+                     && myLocal >= y && myLocal < y + CHIP_NUDGE_H;
+      int bg = hovered ? brighten(CHIP_NEUTRAL_BG) : CHIP_NEUTRAL_BG;
+      g.fill(x, y, x + CHIP_NUDGE_W, y + CHIP_NUDGE_H, bg);
+      g.fill(x, y + CHIP_NUDGE_H, x + CHIP_NUDGE_W, y + CHIP_NUDGE_H + 1, CHIP_NEUTRAL_BORDER);
+      int lw = this.font.width(label);
+      g.drawString(this.font, label,
+         x + (CHIP_NUDGE_W - lw) / 2, y + 5, CHIP_NEUTRAL_FG, true);
+   }
+
+   /** Custom-drawn primary chip (Save). Local coords (renderLabels). */
+   private void drawPrimaryChip(GuiGraphics g, int x, int y, String label, int mxLocal, int myLocal) {
+      boolean hovered = mxLocal >= x && mxLocal < x + CHIP_SAVE_W
+                     && myLocal >= y && myLocal < y + CHIP_SAVE_H;
+      int bg = hovered ? brighten(CHIP_PRIMARY_BG) : CHIP_PRIMARY_BG;
+      g.fill(x, y, x + CHIP_SAVE_W, y + CHIP_SAVE_H, bg);
+      g.fill(x, y + CHIP_SAVE_H, x + CHIP_SAVE_W, y + CHIP_SAVE_H + 1, CHIP_PRIMARY_BORDER);
+      int lw = this.font.width(label);
+      g.drawString(this.font, label,
+         x + (CHIP_SAVE_W - lw) / 2, y + 5, CHIP_PRIMARY_FG, true);
+   }
+
+   private static int brighten(int argb) {
+      int a = (argb >>> 24) & 0xFF;
+      int r = Math.min(255, ((argb >>> 16) & 0xFF) + 20);
+      int gC= Math.min(255, ((argb >>> 8) & 0xFF) + 20);
+      int b = Math.min(255, (argb & 0xFF) + 20);
+      return (a << 24) | (r << 16) | (gC << 8) | b;
+   }
+
+   @Override
+   public boolean mouseClicked(double mouseX, double mouseY, int button) {
+      if (button == 0) {
+         double localMx = mouseX - this.leftPos;
+         double localMy = mouseY - this.topPos;
+         // − / + chip hit-test, per card.
+         for (int i = 0; i < CropPlan.MAX_ENTRIES; i++) {
+            int col = i % GRID_COLS;
+            int rowIdx = i / GRID_COLS;
+            int cardX = GRID_ORIGIN_X + col * (CARD_W + CARD_GAP);
+            int cardY = GRID_ORIGIN_Y + rowIdx * (CARD_H + CARD_GAP);
+            int btnY = cardY + CARD_H - 22;
+            int minusX = cardX + 6;
+            int plusX  = cardX + CARD_W - 6 - CHIP_NUDGE_W;
+            if (localMy >= btnY && localMy < btnY + CHIP_NUDGE_H) {
+               if (localMx >= minusX && localMx < minusX + CHIP_NUDGE_W) {
+                  bumpWeight(i, false);
+                  return true;
+               }
+               if (localMx >= plusX && localMx < plusX + CHIP_NUDGE_W) {
+                  bumpWeight(i, true);
+                  return true;
+               }
+            }
+         }
+         // Save chip hit-test.
+         int saveX = this.imageWidth - CHIP_SAVE_W - 8;
+         int saveY = this.imageHeight - CHIP_SAVE_H - 4;
+         if (localMx >= saveX && localMx < saveX + CHIP_SAVE_W
+             && localMy >= saveY && localMy < saveY + CHIP_SAVE_H) {
+            if (this.minecraft != null && this.minecraft.player != null) {
+               this.minecraft.player.closeContainer();
+            }
+            return true;
+         }
+      }
+      return super.mouseClicked(mouseX, mouseY, button);
    }
 
    private int computeTotalWeight() {
