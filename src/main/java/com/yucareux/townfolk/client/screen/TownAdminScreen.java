@@ -1801,7 +1801,7 @@ public final class TownAdminScreen extends Screen {
                case PARCELS -> renderParcelsTab(graphics, l, r, contentTop, contentBottom, lmX, lmY);
                case TRADE -> renderTradeTab(graphics, l, r, contentTop, contentBottom);
                case TASKS -> renderTasksTab(graphics, l, r, contentTop, contentBottom, mouseX, mouseY);
-               case LOG -> renderLogTab(graphics, l, r, contentTop, contentBottom);
+               case LOG -> LogRenderer.render(this, graphics, l, r, contentTop, contentBottom);
             }
          }
          case SPAWN_FORM -> renderSpawnForm(graphics, l, r, t + headerH + 16, b - PADDING, mouseX, mouseY);
@@ -3318,47 +3318,7 @@ public final class TownAdminScreen extends Screen {
       }
    }
 
-   private void renderLogTab(GuiGraphics graphics, int paneL, int paneR, int top, int bottom) {
-      int innerL = paneL + PADDING;
-      int innerR = paneR - PADDING;
-      int contentTop = top + 10;
-      UiText.heading(graphics, this.font, "Activity log (latest first)", innerL, contentTop);
-      List<TownStateUpdatePayload.LogEntry> entries = this.state.log();
-      UiText.rightFaint(graphics, this.font,
-         entries.size() + " entries", innerR, contentTop);
-      if (entries.isEmpty()) {
-         UiText.faint(graphics, this.font,
-            "(no activity yet — exchanges, dialogue, compaction will appear here)",
-            innerL, contentTop + 14);
-         return;
-      }
-      int y = contentTop + 16;
-      int maxBottom = bottom - 4;
-      for (int i = entries.size() - 1; i >= 0; i--) {
-         if (y > maxBottom) break;
-         TownStateUpdatePayload.LogEntry e = entries.get(i);
-         int color = switch (e.level()) {
-            case "EXCHANGE" -> 0xFFB0D0FF;
-            case "COMPACT"  -> FG_RESOLVED;
-            case "DIALOGUE" -> FG_ACCENT;
-            case "WARN"     -> FG_ERROR;
-            default          -> FG_DIM;
-         };
-         String tag = "[" + e.level().toLowerCase(Locale.ROOT) + "]";
-         graphics.drawString(this.font, tag, innerL, y, color, true);
-         int tagW = this.font.width(tag) + 4;
-         // Wrap the message body across multiple lines instead of truncating.
-         List<FormattedCharSequence> wrapped =
-            this.font.split(Component.literal(e.message()), innerR - innerL - tagW);
-         int textX = innerL + tagW;
-         for (FormattedCharSequence line : wrapped) {
-            if (y > maxBottom) break;
-            graphics.drawString(this.font, line, textX, y, FG_PRIMARY, true);
-            y += this.font.lineHeight + 1;
-         }
-         y += 1;   // small gap between entries
-      }
-   }
+   // Log tab render pipeline lives in {@link LogRenderer} (stage 15b.4.a).
 
    String truncate(String text, int maxPx) {
       if (this.font.width(text) <= maxPx) return text;
