@@ -95,7 +95,9 @@ public final class TownAdminScreen extends Screen {
    private enum Tab { OVERVIEW, VILLAGERS, RESOURCES, PARCELS, TRADE, TASKS, LOG }
    private enum Mode { NORMAL, SPAWN_FORM, VILLAGER_DETAIL, MEMORIES, BELIEFS_FULL, VILLAGER_LOG }
 
-   private TownStateUpdatePayload state;
+   /** Package-private from Stage 15b.2 so extracted section renderers
+    *  in this package can read the latest state snapshot. */
+   TownStateUpdatePayload state;
    private Tab tab = Tab.OVERVIEW;
 
    /** Toolkit-backed lists. Lazily reconstructed in {@link #ensureListsForBounds}
@@ -166,14 +168,19 @@ public final class TownAdminScreen extends Screen {
    /** Sub-tabs inside VILLAGER_DETAIL mode. Each renders its own body
     *  and registers its own widgets in {@link #initVillagerDetailWidgets}.
     *  Persistent across rebuilds so the player stays on the tab they
-    *  picked when state updates arrive. */
-   private enum DetailTab { OVERVIEW, BACKSTORY, MEMORIES, TODOS, PARCELS, RELATIONSHIPS, ACTIONS }
-   private DetailTab detailTab = DetailTab.OVERVIEW;
+    *  picked when state updates arrive.
+    *
+    *  <p>Package-private from Stage 15b.2 so the extracted section
+    *  renderers in this package can read the active tab. */
+   enum DetailTab { OVERVIEW, BACKSTORY, MEMORIES, TODOS, PARCELS, RELATIONSHIPS, ACTIONS }
+   DetailTab detailTab = DetailTab.OVERVIEW;
 
    /** Scroll offset (px) for tab bodies that need it (Backstory text,
-    *  Memories list, Relationships table). Reset on tab switch. */
-   private int detailTabScroll = 0;
-   private UUID selectedVillager;
+    *  Memories list, Relationships table). Reset on tab switch.
+    *  Package-private from Stage 15b.2. */
+   int detailTabScroll = 0;
+   /** Package-private from Stage 15b.2. */
+   UUID selectedVillager;
    private int scrollOffset;
    private int memoryScrollOffset;
    private int beliefsScrollOffset;
@@ -222,12 +229,15 @@ public final class TownAdminScreen extends Screen {
       rebuildAdminWidgets();
    }
 
-   private Optional<TownStateUpdatePayload.VillagerSummary> findVillager(UUID uuid) {
+   /** Package-private from Stage 15b.2 so section renderers in the
+    *  same package can resolve a villager UUID without reaching
+    *  through reflection. */
+   Optional<TownStateUpdatePayload.VillagerSummary> findVillager(UUID uuid) {
       for (var v : this.state.villagers()) if (v.uuid().equals(uuid)) return Optional.of(v);
       return Optional.empty();
    }
 
-   private long townPos() { return this.state.townSquarePos(); }
+   long townPos() { return this.state.townSquarePos(); }
 
    /** Logical canvas dimensions — the screen rendered through the
     *  {@link #CONTENT_SCALE} pose sees this much room. Bigger numbers
@@ -2041,7 +2051,7 @@ public final class TownAdminScreen extends Screen {
    private final java.util.Map<String, net.minecraft.world.item.ItemStack> resourceStackCache =
       new java.util.HashMap<>();
 
-   private net.minecraft.world.item.ItemStack stackForItemId(String id) {
+   net.minecraft.world.item.ItemStack stackForItemId(String id) {
       return this.resourceStackCache.computeIfAbsent(id, k -> {
          var item = net.minecraft.core.registries.BuiltInRegistries.ITEM.get(
             net.minecraft.resources.ResourceLocation.parse(k));
@@ -2654,7 +2664,7 @@ public final class TownAdminScreen extends Screen {
 
    /** Build the human-readable content snapshot for a parcel — same
     *  string the popup uses, abbreviated by truncation when tile-bound. */
-   private static String parcelSnapshotText(TownStateUpdatePayload.ParcelSummary p) {
+   static String parcelSnapshotText(TownStateUpdatePayload.ParcelSummary p) {
       StringBuilder sb = new StringBuilder();
       if ("PLANT".equals(p.type())) {
          if (p.ripeCrops() > 0)     sb.append(p.ripeCrops()).append(" ripe");
@@ -2678,7 +2688,7 @@ public final class TownAdminScreen extends Screen {
       return sb.toString();
    }
 
-   private TownStateUpdatePayload.ParcelSummary findParcel(String id) {
+   TownStateUpdatePayload.ParcelSummary findParcel(String id) {
       if (id == null) return null;
       for (var p : this.state.parcels()) if (id.equals(p.id())) return p;
       return null;
@@ -3021,7 +3031,7 @@ public final class TownAdminScreen extends Screen {
     *  registry — the single source of truth for per-profession
     *  metadata. Stack form cached per profession so renderItem
     *  isn't paying a registry lookup every frame. */
-   private net.minecraft.world.item.ItemStack iconForProfession(String prof) {
+   net.minecraft.world.item.ItemStack iconForProfession(String prof) {
       String key = prof == null ? "" : prof.toLowerCase(Locale.ROOT);
       return this.villagerIconByProfession.computeIfAbsent(key, k ->
          com.yucareux.townfolk.villager.ProfessionTraits.find(k).tileIconStack());
@@ -3065,7 +3075,7 @@ public final class TownAdminScreen extends Screen {
 
 
    /** Schedule activity → friendlier label for inline display. */
-   private static String prettifyActivity(String a) {
+   static String prettifyActivity(String a) {
       if (a == null || a.isEmpty()) return "idle";
       return switch (a) {
          case "waking"        -> "waking up";
@@ -3723,7 +3733,7 @@ public final class TownAdminScreen extends Screen {
       }
    }
 
-   private String truncate(String text, int maxPx) {
+   String truncate(String text, int maxPx) {
       if (this.font.width(text) <= maxPx) return text;
       while (text.length() > 0 && this.font.width(text + "…") > maxPx) {
          text = text.substring(0, text.length() - 1);
