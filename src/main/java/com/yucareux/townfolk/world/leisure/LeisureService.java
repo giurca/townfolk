@@ -125,6 +125,15 @@ public final class LeisureService {
       NEXT_WALK_REROLL.remove(villager);
       LLM_REQUESTED_DAY.remove(villager);
       TAVERN_NEXT_SHUFFLE.remove(villager);
+      TavernBanter.clearForVillager(villager);
+   }
+
+   /** Read-only snapshot of the current choice map. Used by
+    *  {@link TavernBanter#findNearestPatron} to enumerate other
+    *  tavern-bound villagers without exposing the live map for
+    *  mutation. */
+   public static java.util.Map<UUID, LeisureChoice> choicesSnapshot() {
+      return java.util.Collections.unmodifiableMap(CHOICES);
    }
 
    @SubscribeEvent
@@ -195,9 +204,13 @@ public final class LeisureService {
             if (dayTick >= 12000L) continue;
 
             // ── Drive the chosen activity. ──
-            executeChoice(level, v, existing, activeTaverns, now);
+            executeChoice(level, town, v, entry, comp, existing, activeTaverns, now);
          }
       }
+
+      // ── Banter pending-line dispatch. Runs once per poll regardless
+      //    of villagers — line-B emissions live in TavernBanter's queue. ──
+      TavernBanter.drainPendingLines(now);
    }
 
    // ──────────────────── Selection ────────────────────
@@ -317,12 +330,15 @@ public final class LeisureService {
    // ──────────────────── Per-activity executors ────────────────────
 
    private static void executeChoice(ServerLevel level,
+                                      TownSquareBlockEntity town,
                                       Villager v,
+                                      VillagerEntry entry,
+                                      LlmVillagerComponent comp,
                                       LeisureChoice choice,
                                       List<RecognizedBuilding> taverns,
                                       long now) {
       switch (choice.activity()) {
-         case TAVERN -> driveTavern(level, v, choice, taverns, now);
+         case TAVERN -> driveTavern(level, town, v, entry, comp, choice, taverns, now);
          case WALK   -> driveWalk(level, v, choice, now);
          case STAY_HOME -> driveStayHome(level, v);
       }
@@ -338,7 +354,10 @@ public final class LeisureService {
     *        reads as mingling, not statuary.
     *  </ol> */
    private static void driveTavern(ServerLevel level,
+                                    TownSquareBlockEntity town,
                                     Villager v,
+                                    VillagerEntry entry,
+                                    LlmVillagerComponent comp,
                                     LeisureChoice choice,
                                     List<RecognizedBuilding> taverns,
                                     long now) {
@@ -380,6 +399,10 @@ public final class LeisureService {
          if (now % TAVERN_LOOK_INTERVAL_TICKS == 0L) {
             headTrackNearestPatron(level, v);
          }
+         // ── 4. Maybe start banter with a nearby patron. Gated on
+         //       proximity dwell + per-pair cooldown + random; cheap
+         //       in the common case (no eligible partner = early return). ──
+         TavernBanter.maybeTrigger(level, town, v, entry, comp, now);
       } else if (!v.getNavigation().isInProgress()) {
          NavCall.moveTo(v, target, LEISURE_SPEED, "Leisure.tavern");
       }
