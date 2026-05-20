@@ -1,7 +1,8 @@
 {
-  "_comment": "Add Charter Stone to the pickaxe-mineable tag so .requiresCorrectToolForDrops() resolves: pickaxe = correct tool.",
+  "_comment": "Townfolk stone blocks that should be broken with a pickaxe: Charter Stone (town anchor) and Tavern Hearth (tavern marker).",
   "replace": false,
   "values": [
-    "townfolk:town_square"
+    "townfolk:town_square",
+    "townfolk:tavern_hearth"
   ]
 }

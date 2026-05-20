@@ -8,8 +8,9 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
- * Backing block entity for a {@code townfolk:tavern_sign} block —
- * the marker for the {@link com.yucareux.townfolk.building.BuildingTemplates#TAVERN}
+ * Backing block entity for a {@code townfolk:tavern_hearth} block —
+ * the marker for the
+ * {@link com.yucareux.townfolk.building.BuildingTemplates#TAVERN}
  * template.
  *
  * <p>Carries one piece of state: an optional player-set label ("The
@@ -18,16 +19,17 @@ import net.minecraft.world.level.block.state.BlockState;
  * tavern" in narration.
  *
  * <p>The block itself doesn't gate town features or coverage — once
- * a tavern is recognized by {@link com.yucareux.townfolk.building.BuildingRegistry},
- * the leisure layer (Stage 11b) will pick up the active recognition
- * and unlock the tavern choice for nearby villagers.
+ * a tavern is recognized by
+ * {@link com.yucareux.townfolk.building.BuildingRegistry}, the
+ * leisure layer (Stage 11b) picks up the active recognition and
+ * unlocks the tavern choice for nearby villagers.
  */
-public class TavernSignBlockEntity extends BlockEntity {
+public class TavernHearthBlockEntity extends BlockEntity {
 
    private String label = "";
 
-   public TavernSignBlockEntity(BlockPos pos, BlockState state) {
-      super(ModRegistries.TAVERN_SIGN_BE.get(), pos, state);
+   public TavernHearthBlockEntity(BlockPos pos, BlockState state) {
+      super(ModRegistries.TAVERN_HEARTH_BE.get(), pos, state);
    }
 
    public String label() { return this.label; }

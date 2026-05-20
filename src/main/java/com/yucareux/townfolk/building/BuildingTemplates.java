@@ -118,13 +118,13 @@ public final class BuildingTemplates {
       //
       // The tavern unlocks the LEISURE = TAVERN option in Stage 11b's
       // evening-activity flow. No other mechanical effect yet.
-      Block tavernSign = com.yucareux.townfolk.registry.ModRegistries.TAVERN_SIGN_BLOCK.get();
+      Block tavernHearth = com.yucareux.townfolk.registry.ModRegistries.TAVERN_HEARTH_BLOCK.get();
       java.util.LinkedHashMap<Block, Integer> tavernReq = new java.util.LinkedHashMap<>();
       tavernReq.put(Blocks.BARREL, 1);
       tavernReq.put(Blocks.BREWING_STAND, 1);
       out.add(new BuildingTemplate(
          TAVERN,
-         List.of(tavernSign),
+         List.of(tavernHearth),
          tavernReq,
          true,             // requires door
          20, 2,            // 20 m² floor, 2 blocks tall

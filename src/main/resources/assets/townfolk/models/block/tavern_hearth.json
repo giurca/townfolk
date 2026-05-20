@@ -1,0 +1,10 @@
+{
+  "_comment": "Tavern Hearth — stone-brick body, glowing magma top for the 'lit coals' look. Uses vanilla textures only; no custom PNGs.",
+  "parent": "minecraft:block/cube_bottom_top",
+  "textures": {
+    "top":    "minecraft:block/magma",
+    "side":   "minecraft:block/cracked_stone_bricks",
+    "bottom": "minecraft:block/stone_bricks",
+    "particle": "minecraft:block/cracked_stone_bricks"
+  }
+}

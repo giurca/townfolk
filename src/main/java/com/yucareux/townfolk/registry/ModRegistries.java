@@ -153,30 +153,34 @@ public final class ModRegistries {
          () -> BlockEntityType.Builder.of(TradePostBlockEntity::new, TRADE_POST_BLOCK.get()).build(null)
       );
 
-   /** Tavern Sign — marker block for the {@code TAVERN} building
-    *  template (Stage 11a). Wood-strength block, axe-mineable, no
-    *  occlusion (custom non-cube model). */
-   public static final Supplier<com.yucareux.townfolk.block.TavernSignBlock> TAVERN_SIGN_BLOCK =
+   /** Tavern Hearth — marker block for the {@code TAVERN} building
+    *  template (Stage 11a). Full 1×1×1 stone fireplace with glowing
+    *  embers on top. Emits light (level 9) so the tavern interior
+    *  reads as warm + occupied even at night. Mineable with stone+
+    *  pickaxe via the {@code mineable/pickaxe} +
+    *  {@code needs_stone_tool} tags. */
+   public static final Supplier<com.yucareux.townfolk.block.TavernHearthBlock> TAVERN_HEARTH_BLOCK =
       BLOCKS.register(
-         "tavern_sign",
-         () -> new com.yucareux.townfolk.block.TavernSignBlock(BlockBehaviour.Properties.of()
-            .mapColor(MapColor.WOOD)
-            .strength(1.5F, 3.0F)
-            .sound(SoundType.WOOD)
-            .noOcclusion())
+         "tavern_hearth",
+         () -> new com.yucareux.townfolk.block.TavernHearthBlock(BlockBehaviour.Properties.of()
+            .mapColor(MapColor.STONE)
+            .strength(2.0F, 6.0F)
+            .requiresCorrectToolForDrops()
+            .sound(SoundType.STONE)
+            .lightLevel(s -> 9))
       );
 
-   public static final Supplier<Item> TAVERN_SIGN_ITEM = ITEMS.register(
-      "tavern_sign",
-      () -> new BlockItem(TAVERN_SIGN_BLOCK.get(), new Item.Properties())
+   public static final Supplier<Item> TAVERN_HEARTH_ITEM = ITEMS.register(
+      "tavern_hearth",
+      () -> new BlockItem(TAVERN_HEARTH_BLOCK.get(), new Item.Properties())
    );
 
-   public static final Supplier<BlockEntityType<com.yucareux.townfolk.blockentity.TavernSignBlockEntity>>
-      TAVERN_SIGN_BE = BLOCK_ENTITIES.register(
-         "tavern_sign",
+   public static final Supplier<BlockEntityType<com.yucareux.townfolk.blockentity.TavernHearthBlockEntity>>
+      TAVERN_HEARTH_BE = BLOCK_ENTITIES.register(
+         "tavern_hearth",
          () -> BlockEntityType.Builder.of(
-            com.yucareux.townfolk.blockentity.TavernSignBlockEntity::new,
-            TAVERN_SIGN_BLOCK.get()).build(null)
+            com.yucareux.townfolk.blockentity.TavernHearthBlockEntity::new,
+            TAVERN_HEARTH_BLOCK.get()).build(null)
       );
 
    public static void register(IEventBus modEventBus) {
@@ -207,7 +211,7 @@ public final class ModRegistries {
       // auto treatment.
       if (event.getTabKey() == net.minecraft.world.item.CreativeModeTabs.FUNCTIONAL_BLOCKS) {
          event.accept(TRADE_POST_ITEM.get());
-         event.accept(TAVERN_SIGN_ITEM.get());
+         event.accept(TAVERN_HEARTH_ITEM.get());
       }
    }
 

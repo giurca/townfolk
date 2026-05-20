@@ -1,0 +1,18 @@
+{
+  "_comment": "Tavern Hearth: stone bricks corners + coal edges + magma block centre. Reads as a fireplace built around hot coals. Coal is renewable, magma is nether-trip — moderate progression gate.",
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "SCS",
+    "CMC",
+    "SCS"
+  ],
+  "key": {
+    "S": { "item": "minecraft:stone_bricks" },
+    "C": { "item": "minecraft:coal" },
+    "M": { "item": "minecraft:magma_block" }
+  },
+  "result": {
+    "id": "townfolk:tavern_hearth",
+    "count": 1
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "_comment": "Tavern Hearth requires at least a stone pickaxe to drop. Stone tier feels right for an early-game tavern build — wooden pick is reserved for cobblestone tier, stone unlocks the social space.",
+  "replace": false,
+  "values": [
+    "townfolk:tavern_hearth"
+  ]
+}
